@@ -69,6 +69,14 @@ void Curl::parseEvent(const epoll_event &event)
 
 void Curl::disconnect()
 {
+    for(Client * client : clientsList)
+        client->writeEnd();
+    clientsList.clear();
+    //disconnectSocket();
+}
+
+void Curl::disconnectSocket()
+{
     if(fd!=-1)
     {
         epoll_ctl(epollfd,EPOLL_CTL_DEL, fd, NULL);
@@ -78,10 +86,6 @@ void Curl::disconnect()
         rename((cachePath+".tmp").c_str(),cachePath.c_str());
         fd=-1;
     }
-
-    /*for(Client * client : clientsList)
-        client->writeEnd();
-    clientsList.clear();*/
 }
 
 /* Assign information to a SockInfo structure */

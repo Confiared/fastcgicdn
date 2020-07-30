@@ -704,7 +704,8 @@ void Client::write(const char * const data,const int &size)
 }
 
 void Client::writeEnd()
-{
+{   if(partial)
+        continueRead();
     char header[1+1+2+2+2+4+4];
     header[0]=1;
     //FCGI_END_REQUEST

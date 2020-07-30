@@ -91,6 +91,7 @@ void CurlMulti::check_multi_info()
       curl_easy_getinfo(easy, CURLINFO_PRIVATE, &curl);
       curl_easy_getinfo(easy, CURLINFO_EFFECTIVE_URL, &eff_url);
       std::cout << "DONE: " << eff_url << " => (" << res << ") " << curl->error << std::endl;
+      curl->disconnect();
       curl_multi_remove_handle(multi, easy);
       curl_easy_cleanup(easy);
       delete curl;
@@ -143,7 +144,7 @@ int CurlMulti::sock_cb(CURL *e, curl_socket_t s, int what, void *cbp, void *sock
     std::cout << "socket callback: s=" << s << " e=" << e << " what=" << whatstr[what] << std::endl;
     if(what == CURL_POLL_REMOVE) {
         std::cout << "REMOVE" << std::endl;
-        fdp->disconnect();
+        fdp->disconnectSocket();
         //delete fdp;
     }
     else {

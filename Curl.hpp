@@ -18,6 +18,7 @@ public:
     ~Curl();
     void parseEvent(const epoll_event &event) override;
     void disconnect();
+    void disconnectSocket();
     void setsock(curl_socket_t s, CURL *e, int act);
     const int &getAction() const;
     CURL * getEasy() const;
