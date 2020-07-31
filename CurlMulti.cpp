@@ -91,6 +91,7 @@ void CurlMulti::check_multi_info()
       curl_easy_getinfo(easy, CURLINFO_PRIVATE, &curl);
       curl_easy_getinfo(easy, CURLINFO_EFFECTIVE_URL, &eff_url);
       std::cout << "DONE: " << eff_url << " => (" << res << ") " << curl->error << std::endl;
+      curl->curlError(res);
       curl->disconnect();
       curl_multi_remove_handle(multi, easy);
       curl_easy_cleanup(easy);

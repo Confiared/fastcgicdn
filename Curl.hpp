@@ -27,6 +27,7 @@ public:
     const int64_t &get_mtime() const;
     static std::string timestampsToHttpDate(const int64_t &time);
     void addClient(Client * client);
+    void curlError(const CURLcode &errorCode);
 public:
     char error[CURL_ERROR_SIZE];
 private:

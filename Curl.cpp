@@ -75,6 +75,15 @@ void Curl::disconnect()
     //disconnectSocket();
 }
 
+void Curl::curlError(const CURLcode &errorCode)
+{
+    const std::string &errorString(curl_easy_strerror(errorCode));
+    for(Client * client : clientsList)
+        client->curlError(errorString);
+    clientsList.clear();
+    //disconnectSocket();
+}
+
 void Curl::disconnectSocket()
 {
     if(fd!=-1)

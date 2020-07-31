@@ -30,6 +30,7 @@ public:
     void write(const char * const data,const int &size);
     void writeOutput(const char * const data,const int &size);
     void writeEnd();
+    void curlError(const std::string &errorString);
 
     void startRead();
     void startRead(const std::string &path, const bool &partial);
@@ -50,6 +51,7 @@ private:
     Status status;
     bool https;
     bool partial;
+    bool outputWrited;
     std::string uri;
     std::string host;
 };

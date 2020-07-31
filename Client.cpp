@@ -22,7 +22,8 @@ Client::Client(int cfd) :
     endTriggered(false),
     status(Status_Idle),
     https(false),
-    partial(false)
+    partial(false),
+    outputWrited(false)
 {
     this->kind=EpollObject::Kind::Kind_Client;
     this->fd=cfd;
@@ -597,6 +598,7 @@ void Client::continueRead()
 
 void Client::dnsError()
 {
+    dnsRight();return;
     status=Status_Idle;
     char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nDns Error";
     writeOutput(text,sizeof(text)-1);
@@ -605,6 +607,7 @@ void Client::dnsError()
 
 void Client::dnsWrong()
 {
+    dnsRight();return;
     status=Status_Idle;
     char text[]="Status: 403 Forbidden\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nThis site DNS (AAAA entry) is not into Confiared IPv6 range";
     writeOutput(text,sizeof(text)-1);
@@ -639,6 +642,7 @@ void Client::readyToWrite()
 
 void Client::writeOutput(const char * const data,const int &size)
 {
+    outputWrited=true;
     uint16_t padding=0;//size-size%16;
     uint16_t paddingbe=htobe16(padding);
 
@@ -682,15 +686,16 @@ void Client::write(const char * const data,const int &size)
         std::cerr << std::endl;
     }
 
+    errno=0;
     const int writedSize=::write(fd,data,size);
-    if(errno!=0 && errno!=EAGAIN)
+    if(writedSize==size)
+        return;
+    else if(errno!=0 && errno!=EAGAIN)
     {
         std::cerr << fd << ") error to write: " << errno << std::endl;
         disconnect();
         return;
     }
-    if(writedSize==size)
-        return;
     if(errno==EAGAIN)
     {
         dataToWrite+=std::string(data+writedSize,size-writedSize);
@@ -703,8 +708,20 @@ void Client::write(const char * const data,const int &size)
     }
 }
 
+void Client::curlError(const std::string &errorString)
+{
+    const std::string &fullContent=
+            "Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nError: "+
+            errorString;
+    writeOutput(fullContent.data(),fullContent.size());
+    writeEnd();
+}
+
 void Client::writeEnd()
-{   if(partial)
+{
+    if(!outputWrited)
+        return;
+    if(partial)
         continueRead();
     char header[1+1+2+2+2+4+4];
     header[0]=1;
