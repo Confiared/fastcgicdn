@@ -586,7 +586,7 @@ void Client::continueRead()
         return;
     if(!dataToWrite.empty())
         return;
-    char buffer[65536];
+    char buffer[65536-1000];
     do {
         const ssize_t &s=readCache->read(buffer,sizeof(buffer));
         if(s<1)
@@ -689,13 +689,18 @@ void Client::write(const char * const data,const int &size)
         return;
     }
     {
-        std::cerr << fd << "write) ";
-        const char* const lut = "0123456789ABCDEF";
-        for(int i=0;i<size;++i)
+        std::cerr << fd << " write) ";
+        if(size>255)
+            std::cerr << "size: " << size;
+        else
         {
-            const unsigned char c = data[i];
-            std::cerr << lut[c >> 4];
-            std::cerr << lut[c & 15];
+            const char* const lut = "0123456789ABCDEF";
+            for(int i=0;i<size;++i)
+            {
+                const unsigned char c = data[i];
+                std::cerr << lut[c >> 4];
+                std::cerr << lut[c & 15];
+            }
         }
         std::cerr << std::endl;
     }

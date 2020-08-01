@@ -251,5 +251,6 @@ Curl *CurlMulti::download(const char * const url, const char * const cachePath,c
 
     /* note that the add_handle() will set a time-out to trigger very soon so
     that the necessary socket_action() call will be called by this app */
+    pathToCurl[cachePath]=curl;
     return curl;
 }
