@@ -35,6 +35,7 @@ public:
     void startRead();
     void startRead(const std::string &path, const bool &partial);
     void continueRead();
+    void tryResumeReadAfterEndOfFile();
 
     enum Status : uint8_t
     {
@@ -51,6 +52,7 @@ private:
     Status status;
     bool https;
     bool partial;
+    bool partialEndOfFileTrigged;
     bool outputWrited;
     std::string uri;
     std::string host;

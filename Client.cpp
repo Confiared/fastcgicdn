@@ -23,6 +23,7 @@ Client::Client(int cfd) :
     status(Status_Idle),
     https(false),
     partial(false),
+    partialEndOfFileTrigged(false),
     outputWrited(false)
 {
     this->kind=EpollObject::Kind::Kind_Client;
@@ -310,7 +311,7 @@ void Client::readyToRead()
                     {
                         if(poss>2)
                         {
-                            host=hexaToBinary(uri.substr(1,poss-1));
+                            host=uri.substr(1,poss-1);
                             uri=uri.substr(poss);
                         }
                     }
@@ -337,7 +338,7 @@ void Client::readyToRead()
                         {
                             if(poss>2)
                             {
-                                host=hexaToBinary(uri.substr(1,poss-1));
+                                host=uri.substr(1,poss-1);
                                 uri=uri.substr(poss);
                             }
                         }
@@ -573,6 +574,12 @@ void Client::startRead(const std::string &path, const bool &partial)
     startRead();
 }
 
+void Client::tryResumeReadAfterEndOfFile()
+{
+    if(partialEndOfFileTrigged)
+        continueRead();
+}
+
 void Client::continueRead()
 {
     if(readCache==nullptr)
@@ -586,8 +593,14 @@ void Client::continueRead()
         {
             if(!partial)
                 writeEnd();
+            else
+            {
+                partialEndOfFileTrigged=true;
+                std::cout << "End of file, wait more" << std::endl;
+            }
             return;
         }
+        partialEndOfFileTrigged=false;
         writeOutput(buffer,s);
         //if can't write all
         if(!dataToWrite.empty())
@@ -638,6 +651,7 @@ void Client::readyToWrite()
 
         return;
     }
+    continueRead();
 }
 
 void Client::writeOutput(const char * const data,const int &size)

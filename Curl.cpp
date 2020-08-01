@@ -210,8 +210,8 @@ int Curl::write(const void * const data,const size_t &size)
     }
 
     const size_t &writedSize=tempCache->write((char *)data,size);
-    /*while(Client list)
-        new cache data;*/
+    for(Client * client : clientsList)
+        client->tryResumeReadAfterEndOfFile();
     return writedSize;
     //(write partial cache)
     //open to write .tmp (mv at end)
