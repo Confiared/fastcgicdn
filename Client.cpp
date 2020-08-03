@@ -52,7 +52,7 @@ void Client::disconnect()
 {
     if(fd!=-1)
     {
-        std::cerr << fd << " disconnect()" << std::endl;
+        //std::cerr << fd << " disconnect()" << std::endl;
         //std::cout << "disconnect()" << std::endl;
         epoll_ctl(epollfd,EPOLL_CTL_DEL, fd, NULL);
         ::close(fd);
@@ -484,7 +484,7 @@ void Client::dnsRight()
         url+=uri;
         //try open cache
         //std::cerr << "open((path).c_str() " << path << std::endl;
-        int cachefd = open(path.c_str(), O_RDWR | O_NOCTTY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        int cachefd = open(path.c_str(), O_RDWR | O_NOCTTY/* | O_NONBLOCK*/, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         //if failed open cache
         if(cachefd==-1)
         {
@@ -537,7 +537,7 @@ void Client::startRead()
     if(!readCache->setContentPos())
     {
         status=Status_Idle;
-        char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nUnable to read cache";
+        char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nUnable to read cache (1)";
         writeOutput(text,sizeof(text)-1);
         writeEnd();
         return;
@@ -554,7 +554,7 @@ void Client::startRead(const std::string &path, const bool &partial)
     if(cachefd==-1)
     {
         status=Status_Idle;
-        char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nUnable to read cache";
+        char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nUnable to read cache (2)";
         writeOutput(text,sizeof(text)-1);
         writeEnd();
         return;
@@ -611,7 +611,6 @@ void Client::continueRead()
 
 void Client::dnsError()
 {
-    dnsRight();return;
     status=Status_Idle;
     char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nDns Error";
     writeOutput(text,sizeof(text)-1);
@@ -620,7 +619,6 @@ void Client::dnsError()
 
 void Client::dnsWrong()
 {
-    dnsRight();return;
     status=Status_Idle;
     char text[]="Status: 403 Forbidden\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nThis site DNS (AAAA entry) is not into Confiared IPv6 range";
     writeOutput(text,sizeof(text)-1);
@@ -688,7 +686,7 @@ void Client::write(const char * const data,const int &size)
         dataToWrite+=std::string(data,size);
         return;
     }
-    {
+    /*{
         std::cerr << fd << " write) ";
         if(size>255)
             std::cerr << "size: " << size;
@@ -703,7 +701,7 @@ void Client::write(const char * const data,const int &size)
             }
         }
         std::cerr << std::endl;
-    }
+    }*/
 
     errno=0;
     const int writedSize=::write(fd,data,size);

@@ -168,7 +168,7 @@ int Curl::write(const void * const data,const size_t &size)
             delete tempCache;
         int cachefd=-1;
         std::cerr << "open((cachePath+.tmp).c_str() " << (cachePath+".tmp") << std::endl;
-        if((cachefd = open((cachePath+".tmp").c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH))==-1)
+        if((cachefd = open((cachePath+".tmp").c_str(), O_RDWR | O_CREAT | O_TRUNC/* | O_NONBLOCK*/, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH))==-1)
         {
             std::cerr << "open((cachePath+.tmp).c_str() failed " << (cachePath+".tmp") << " errno " << errno << std::endl;
             //return internal error

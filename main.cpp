@@ -6,6 +6,8 @@
 #include "Dns.hpp"
 #include "CurlMulti.hpp"
 #include "Timer.hpp"
+#include "Timer/DNSCache.hpp"
+#include "Timer/DNSQuery.hpp"
 #include <vector>
 #include <cstring>
 #include <cstdio>
@@ -61,6 +63,10 @@ int main(int argc, char *argv[])
     EpollObject::epollfd=epollfd;
     Dns::dns=new Dns();
     CurlMulti::curlMulti=new CurlMulti();
+    DNSCache dnsCache;
+    dnsCache.start(3600*1000);
+    DNSQuery dnsQuery;
+    dnsQuery.start(10);
 
     /* cachePath (content header, 64Bits aligned):
      * 64Bits: access time

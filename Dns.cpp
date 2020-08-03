@@ -5,6 +5,7 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <fcntl.h>
 
@@ -201,7 +202,8 @@ void Dns::parseEvent(const epoll_event &event)
             clientInProgress--;
 
             int pos=0;
-            if(!canAddToPos(2,size,pos))
+            uint16_t transactionId=0;
+            if(!read16BitsRaw(transactionId,buffer,size,pos))
                 return;
             uint16_t flags=0;
             if(!read16Bits(flags,buffer,size,pos))
@@ -213,122 +215,201 @@ void Dns::parseEvent(const epoll_event &event)
             uint16_t answers=0;
             if(!read16Bits(answers,buffer,size,pos))
                 return;
-            if(!canAddToPos(2,size,pos))
-                return;
-            if(!canAddToPos(2,size,pos))
-                return;
-            //load the query
-            char host[4096]={0};
-            uint8_t len,offs=0;
-            while((offs<(size-pos)) && (len = buffer[pos+offs])) {
-                strncat(host,buffer+pos+offs+1,len);
-                strncat(host,".",2);
-                offs += len+1;
-            }
-            host[offs-1]=0x00;
-            pos+=offs+1;
-            if (offs>253)//Sorry: query name length exceeds maximum.
+            if(!canAddToPos(2+2,size,pos))
                 return;
 
+            //skip query
+            uint8_t len,offs=0;
+            while((offs<(size-pos)) && (len = buffer[pos+offs]))
+                offs += len+1;
+            pos+=offs+1;
             uint16_t type=0;
             if(!read16Bits(type,buffer,size,pos))
                 return;
             if(type!=0x001c)
-            {
-                abort();
                 return;
-            }
             uint16_t classIn=0;
             if(!read16Bits(classIn,buffer,size,pos))
                 return;
             if(classIn!=0x0001)
                 return;
 
-            for(unsigned int i=0;host[i]!=0 && i<sizeof(host);i++)
-                host[i] = tolower(host[i]);
-            std::string hostcpp(host);
 
             //answers list
-            if(queryList.find(hostcpp)!=queryList.cend())
+            if(queryList.find(transactionId)!=queryList.cend())
             {
-                const std::vector<Client *> &clients=queryList.at(hostcpp).clients;
+                const Query &q=queryList.at(transactionId);
+                const std::vector<Client *> &clients=q.clients;
+                //std::string hostcpp(std::string hostcpp(q.host));-> not needed
                 if(!clients.empty())
                 {
                     bool clientsFlushed=false;
-                    while(answersIndex<answers)
-                    {
-                        uint16_t AName=0;
-                        if(!read16Bits(AName,buffer,size,pos))
-                            return;
-                        /*if(AName!=0xc00c)
-                            return;*/
-                        if(!read16Bits(type,buffer,size,pos))
-                            return;
-                        switch(type)
-                        {
-                            //AAAA
-                            case 0x001c:
-                            {
-                                if(!read16Bits(classIn,buffer,size,pos))
-                                    return;
-                                if(classIn!=0x0001)
-                                    return;
-                                uint32_t ttl=0;
-                                if(!read32Bits(ttl,buffer,size,pos))
-                                    return;
-                                uint16_t datasize=0;
-                                if(!read16Bits(datasize,buffer,size,pos))
-                                    return;
-                                if(datasize!=16)
-                                    return;
 
-                                //TODO saveToCache();
-                                unsigned char check[]={0x28,0x03,0x19,0x20};
-                                if(memcmp(buffer+pos,check,sizeof(check))!=0 || (flags & 0xFF0F)!=0x8100)
-                                {
-                                    if(!clientsFlushed)
-                                    {
-                                        clientsFlushed=true;
-                                        for(Client * const c : clients)
-                                            c->dnsWrong();
-                                        queryList.erase(hostcpp);
-                                    }
-                                }
-                                else
-                                {
-                                    if(!clientsFlushed)
-                                    {
-                                        clientsFlushed=true;
-                                        for(Client * const c : clients)
-                                            c->dnsRight();
-                                        queryList.erase(hostcpp);
-                                    }
-                                }
-                                answersIndex=answers;
-                            }
-                            break;
-                            default:
-                            {
-                                canAddToPos(2+4,size,pos);
-                                uint16_t datasize=0;
-                                if(!read16Bits(datasize,buffer,size,pos))
-                                    return;
-                                canAddToPos(datasize,size,pos);
-                            }
-                            break;
+                    if((flags & 0x000F)==0x0001)
+                    {
+                        if(!clientsFlushed)
+                        {
+                            clientsFlushed=true;
+                            //addCacheEntry(StatusEntry_Wrong,0,q.host);-> wrong string to resolve, host is not dns valid
+                            for(Client * const c : clients)
+                                c->dnsError();
+                            removeQuery(transactionId);
                         }
                     }
-                    if(!clientsFlushed)
+                    else if((flags & 0xFF0F)!=0x8100)
                     {
-                        clientsFlushed=true;
-                        for(Client * const c : clients)
-                            c->dnsError();
-                        queryList.erase(hostcpp);
+                        if(!clientsFlushed)
+                        {
+                            clientsFlushed=true;
+                            addCacheEntry(StatusEntry_Wrong,0,q.host);
+                            for(Client * const c : clients)
+                                c->dnsError();
+                            removeQuery(transactionId);
+                        }
+                    }
+                    else
+                    {
+                        while(answersIndex<answers)
+                        {
+                            uint16_t AName=0;
+                            if(!read16Bits(AName,buffer,size,pos))
+                                return;
+                            uint16_t type=0;
+                            if(!read16Bits(type,buffer,size,pos))
+                                if(!clientsFlushed)
+                                {
+                                    clientsFlushed=true;
+                                    addCacheEntry(StatusEntry_Error,3600,q.host);
+                                    for(Client * const c : clients)
+                                        c->dnsError();
+                                    removeQuery(transactionId);
+                                }
+                            switch(type)
+                            {
+                                //AAAA
+                                case 0x001c:
+                                {
+                                    uint16_t classIn=0;
+                                    if(!read16Bits(classIn,buffer,size,pos))
+                                        return;
+                                    if(classIn!=0x0001)
+                                        break;
+                                    uint32_t ttl=0;
+                                    if(!read32Bits(ttl,buffer,size,pos))
+                                        return;
+                                    uint16_t datasize=0;
+                                    if(!read16Bits(datasize,buffer,size,pos))
+                                        return;
+                                    if(datasize!=16)
+                                        return;
+
+                                    //TODO saveToCache();
+                                    unsigned char check[]={0x28,0x03,0x19,0x20};
+                                    if(memcmp(buffer+pos,check,sizeof(check))!=0)
+                                    {
+                                        if(!clientsFlushed)
+                                        {
+                                            clientsFlushed=true;
+                                            addCacheEntry(StatusEntry_Wrong,ttl,q.host);
+                                            for(Client * const c : clients)
+                                                c->dnsWrong();
+                                            removeQuery(transactionId);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if(!clientsFlushed)
+                                        {
+                                            clientsFlushed=true;
+                                            addCacheEntry(StatusEntry_Right,ttl,q.host);
+                                            for(Client * const c : clients)
+                                                c->dnsRight();
+                                            removeQuery(transactionId);
+                                        }
+                                    }
+                                }
+                                break;
+                                default:
+                                {
+                                    canAddToPos(2+4,size,pos);
+                                    uint16_t datasize=0;
+                                    if(!read16Bits(datasize,buffer,size,pos))
+                                        return;
+                                    canAddToPos(datasize,size,pos);
+                                }
+                                break;
+                            }
+                            answersIndex++;
+                        }
+                        if(!clientsFlushed)
+                        {
+                            clientsFlushed=true;
+                            addCacheEntry(StatusEntry_Error,3600,q.host);
+                            for(Client * const c : clients)
+                                c->dnsError();
+                            removeQuery(transactionId);
+                        }
                     }
                 }
             }
         } while(size>=0);
     }
+}
+
+void Dns::cleanCache()
+{
+    for (auto const& x : cacheByOutdatedDate)
+    {
+        const uint64_t t=x.first;
+        if(t>(uint64_t)time(NULL))
+            return;
+        const std::vector<std::string> &list=x.second;
+        for (auto const& y : list)
+            cache.erase(y);
+        cacheByOutdatedDate.erase(t);
+    }
+}
+
+void Dns::addCacheEntry(const StatusEntry &s,const uint32_t &ttl,const std::string &host)
+{
+    //prevent DDOS due to out of memory situation
+    if(cache.size()>5000)
+        return;
+
+    //remove old entry from cacheByOutdatedDate
+    if(cache.find(host)!=cache.cend())
+    {
+        const CacheEntry &e=cache.at(host);
+        std::vector<std::string> &list=cacheByOutdatedDate[e.outdated_date];
+        for (size_t i = 0; i < list.size(); i++) {
+            const std::string &s=list.at(i);
+            if(s==host)
+            {
+                list.erase(list.cbegin()+i);
+                break;
+            }
+        }
+    }
+
+    CacheEntry &entry=cache[host];
+    if(ttl<24*3600)
+    {
+        //in case of wrong ttl, ttl too short or dns error
+        if(ttl<5*60)
+        {
+            if(s==StatusEntry_Right)
+                entry.outdated_date=time(NULL)+5*60;
+            else
+                entry.outdated_date=time(NULL)+3600;
+        }
+    }
+    else
+        entry.outdated_date=time(NULL)+24*3600;
+    entry.status=s;
+    //memcpy(entry.sin6_addr,buffer+pos,sizeof(in6_addr));
+
+    //insert entry to cacheByOutdatedDate
+    cacheByOutdatedDate[entry.outdated_date].push_back(host);
 }
 
 bool Dns::canAddToPos(const int &i, const int &size, int &pos)
@@ -350,11 +431,17 @@ bool Dns::read8Bits(uint8_t &var, const char * const data, const int &size, int 
 
 bool Dns::read16Bits(uint16_t &var, const char * const data, const int &size, int &pos)
 {
+    uint16_t t=0;
+    read16BitsRaw(t,data,size,pos);
+    var=be16toh(t);
+    return var;
+}
+
+bool Dns::read16BitsRaw(uint16_t &var, const char * const data, const int &size, int &pos)
+{
     if((pos+(int)sizeof(var))>size)
         return false;
-    uint16_t t;
-    memcpy(&t,data+pos,sizeof(var));
-    var=be16toh(t);
+    memcpy(&var,data+pos,sizeof(var));
     pos+=sizeof(var);
     return true;
 }
@@ -372,10 +459,42 @@ bool Dns::read32Bits(uint32_t &var, const char * const data, const int &size, in
 
 bool Dns::get(Client * client,const std::string &host)
 {
-    if(queryList.find(host)!=queryList.cend())
+    if(queryListByHost.find(host)!=queryListByHost.cend())
     {
-        queryList[host].clients.push_back(client);
-        return true;
+        const uint16_t &queryId=queryListByHost.at(host);
+        if(queryList.find(queryId)!=queryList.cend())
+        {
+            queryList[queryId].clients.push_back(client);
+            return true;
+        }
+        else //bug, try fix
+            queryListByHost.erase(host);
+    }
+    if(cache.find(host)!=cache.cend())
+    {
+        CacheEntry &entry=cache.at(host);
+        uint64_t t=time(NULL);
+        if(entry.outdated_date>t)
+        {
+            const uint64_t &maxTime=t+24*3600;
+            //fix time drift
+            if(entry.outdated_date>maxTime)
+                entry.outdated_date=maxTime;
+            switch(entry.status)
+            {
+                case StatusEntry_Right:
+                    client->dnsRight();
+                break;
+                case StatusEntry_Error:
+                    client->dnsError();
+                break;
+                default:
+                case StatusEntry_Wrong:
+                    client->dnsWrong();
+                break;
+            }
+            return true;
+        }
     }
     if(clientInProgress>1000)
         return false;
@@ -437,37 +556,100 @@ bool Dns::get(Client * client,const std::string &host)
         /*int result = */sendto(fd,&buffer,pos,0,(struct sockaddr*)&targetDnsIPv4,sizeof(targetDnsIPv4));
 
     Query queryToPush;
-    queryToPush.startTime=0;//todo
+    queryToPush.host=host;
+    queryToPush.retryTime=0;
+    queryToPush.nextRetry=time(NULL)+5;
+    queryToPush.query=std::string((char *)buffer,pos);
     queryToPush.clients.push_back(client);
-    queryList[host]=queryToPush;
+    addQuery(query->id,queryToPush);
     return true;
+}
+
+void Dns::addQuery(const uint16_t &id, const Query &query)
+{
+    queryList[id]=query;
+    queryListByHost[query.host]=id;
+    queryByNextDueTime[query.nextRetry].push_back(id);
+}
+
+void Dns::removeQuery(const uint16_t &id, const bool &withNextDueTime)
+{
+    const Query &query=queryList.at(id);
+    if(withNextDueTime)
+        queryByNextDueTime.erase(query.nextRetry);
+    queryListByHost.erase(query.host);
+    queryList.erase(id);
 }
 
 void Dns::cancelClient(Client * client,const std::string &host)
 {
-    if(queryList.find(host)!=queryList.cend())
+    if(queryListByHost.find(host)!=queryListByHost.cend())
     {
-        std::vector<Client *> &clients=queryList[host].clients;
-        //optimize, less check
-        if(clients.size()<=1)
+        const uint16_t queryId=queryListByHost.at(host);
+        if(queryList.find(queryId)!=queryList.cend())
         {
-            queryList.erase(host);
+            std::vector<Client *> &clients=queryList[queryId].clients;
+            //optimize, less check
+            if(clients.size()<=1)
+            {
+                removeQuery(queryId);
+                return;
+            }
+            unsigned int index=0;
+            while(index<clients.size())
+            {
+                if(client==clients.at(index))
+                {
+                    clients.erase(clients.cbegin()+index);
+                    break;
+                }
+                index++;
+            }
             return;
         }
-        unsigned int index=0;
-        while(index<clients.size())
-        {
-            if(client==clients.at(index))
-            {
-                clients.erase(clients.cbegin()+index);
-                break;
-            }
-            index++;
-        }
+        else //bug, try fix
+            queryListByHost.erase(host);
     }
 }
 
 int Dns::requestCountMerged()
 {
-    return 0;
+    return queryListByHost.size();
+}
+
+void Dns::checkQueries()
+{
+    const std::map<uint64_t,std::vector<uint16_t>> queryByNextDueTime=this->queryByNextDueTime;
+    for (auto const &x : queryByNextDueTime)
+    {
+        const uint64_t t=x.first;
+        if(t>(uint64_t)time(NULL))
+            return;
+        const std::vector<uint16_t> &list=x.second;
+        for (auto const& id : list)
+        {
+            Query &query=queryList.at(id);
+            if(query.retryTime<2)
+            {
+                if(mode==Mode_IPv6)
+                    /*int result = */sendto(fd,query.query.data(),query.query.size(),0,(struct sockaddr*)&targetDnsIPv6,sizeof(targetDnsIPv6));
+                else //if(mode==Mode_IPv4)
+                    /*int result = */sendto(fd,query.query.data(),query.query.size(),0,(struct sockaddr*)&targetDnsIPv4,sizeof(targetDnsIPv4));
+                query.retryTime++;
+                query.nextRetry=time(NULL)+5;
+                this->queryByNextDueTime[query.nextRetry].push_back(id);
+            }
+            else
+            {
+                const std::vector<Client *> &clients=query.clients;
+                for(Client * const c : clients)
+                    c->dnsError();
+                removeQuery(id);
+            }
+
+            //query=cache.erase(y);
+        }
+        this->queryByNextDueTime.erase(t);
+        //cacheByOutdatedDate.erase(t);
+    }
 }

@@ -24,7 +24,9 @@ SOURCES += main.cpp \
     Server.cpp \
     Dns.cpp \
     Timer.cpp \
-    Cache.cpp
+    Cache.cpp \
+    Timer/DNSCache.cpp \
+    Timer/DNSQuery.cpp
 
 HEADERS += \
     Client.hpp \
@@ -34,4 +36,6 @@ HEADERS += \
     Server.hpp \
     Dns.hpp \
     Timer.hpp \
-    Cache.hpp
+    Cache.hpp \
+    Timer/DNSCache.hpp \
+    Timer/DNSQuery.hpp

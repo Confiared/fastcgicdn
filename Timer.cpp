@@ -82,3 +82,8 @@ void Timer::validateTheTimer()
     if(::read(fd, buff_temp, sizeof(uint64_t))!=sizeof(uint64_t))
     {}
 }
+
+void Timer::parseEvent(const epoll_event &event)
+{
+    (void)event;
+}

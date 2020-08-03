@@ -13,6 +13,7 @@ public:
     void validateTheTimer();
 private:
     unsigned int msec;
+    void parseEvent(const epoll_event &event);
 };
 
 #endif // EPOLL_TIMER_H
