@@ -14,7 +14,7 @@ public:
     ~CurlMulti();
     static CurlMulti *curlMulti;
     void parseEvent(const epoll_event &event) override;
-    Curl * download(const char * const url, const char * const cachePath,const int &cachefd/*0 if no old cache file found*/);
+    Curl * download(const std::string &url, const std::string &cachePath, const int &cachefd/*0 if no old cache file found*/);
 
     void check_multi_info();
     static int multi_timer_cb(CURLM *multi, long timeout_ms);

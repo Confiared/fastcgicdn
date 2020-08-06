@@ -18,6 +18,7 @@ static const char* const lut = "0123456789ABCDEF";
 Client::Client(int cfd) :
     fastcgiid(-1),
     readCache(nullptr),
+    curl(nullptr),
     fullyParsed(false),
     endTriggered(false),
     status(Status_Idle),
@@ -38,6 +39,8 @@ Client::~Client()
         delete readCache;
         readCache=nullptr;
     }
+    if(curl)
+        curl->removeClient(this);
 }
 
 void Client::parseEvent(const epoll_event &event)
@@ -58,6 +61,8 @@ void Client::disconnect()
         ::close(fd);
         fd=-1;
     }
+    if(curl)
+        curl->removeClient(this);
     dataToWrite.clear();
     if(status==Status_WaitDns)
         Dns::dns->cancelClient(this,host);
@@ -316,7 +321,13 @@ void Client::readyToRead()
                         }
                     }
                     else
-                        std::cerr << "uri '/' not found " << uri << ", host: " << host << std::endl;
+                    {
+                        //std::cerr << "uri '/' not found " << uri << ", host: " << host << std::endl;
+                        char text[]="X-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nCDN bad usage: contact@confiared.com";
+                        writeOutput(text,sizeof(text)-1);
+                        writeEnd();
+                        return;
+                    }
                 }
             }
             else
@@ -343,7 +354,13 @@ void Client::readyToRead()
                             }
                         }
                         else
-                            std::cerr << "uri '/' not found " << uri << ", host: " << host << std::endl;
+                        {
+                            //std::cerr << "uri '/' not found " << uri << ", host: " << host << std::endl;
+                            char text[]="X-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nCDN bad usage: contact@confiared.com";
+                            writeOutput(text,sizeof(text)-1);
+                            writeEnd();
+                            return;
+                        }
                     }
                 }
             }
@@ -426,6 +443,24 @@ std::string Client::binarytoHexa(const char * const data, const uint32_t &size)
     return output;
 }
 
+void Client::dnsError()
+{
+    dnsRight();return;
+    status=Status_Idle;
+    char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nDns Error";
+    writeOutput(text,sizeof(text)-1);
+    writeEnd();
+}
+
+void Client::dnsWrong()
+{
+    dnsRight();return;
+    status=Status_Idle;
+    char text[]="Status: 403 Forbidden\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nThis site DNS (AAAA entry) is not into Confiared IPv6 range";
+    writeOutput(text,sizeof(text)-1);
+    writeEnd();
+}
+
 void Client::dnsRight()
 {
     /* Each Hours clean cache (to defined better)
@@ -456,17 +491,33 @@ void Client::dnsRight()
     if(https)
         hostwithprotocol+="s";
 
-    const uint32_t &hashhost=static_cast<uint32_t>(XXH3_64bits(hostwithprotocol.data(),hostwithprotocol.size()));
-    const XXH64_hash_t &hashuri=XXH3_64bits(uri.data(),uri.size());
-
-    //do the hash for host to define cache subfolder, hash for uri to file
     std::string path("cache/");
-    //std::string folder;
-    const std::string folder = binarytoHexa(reinterpret_cast<const char *>(&hashhost),sizeof(hashhost));
-    path+=folder+"/";
+    std::string folder;
+    if(Cache::hostsubfolder)
+    {
+        const uint32_t &hashhost=static_cast<uint32_t>(XXH3_64bits(hostwithprotocol.data(),hostwithprotocol.size()));
+        const XXH64_hash_t &hashuri=XXH3_64bits(uri.data(),uri.size());
 
-    const std::string urifolder = binarytoHexa(reinterpret_cast<const char *>(&hashuri),sizeof(hashuri));
-    path+=urifolder;
+        //do the hash for host to define cache subfolder, hash for uri to file
+
+        //std::string folder;
+        folder = binarytoHexa(reinterpret_cast<const char *>(&hashhost),sizeof(hashhost));
+        path+=folder+"/";
+
+        const std::string urifolder = binarytoHexa(reinterpret_cast<const char *>(&hashuri),sizeof(hashuri));
+        path+=urifolder;
+    }
+    else
+    {
+        XXH3_state_t state;
+        XXH3_64bits_reset(&state);
+        XXH3_64bits_update(&state, hostwithprotocol.data(),hostwithprotocol.size());
+        XXH3_64bits_update(&state, uri.data(),uri.size());
+        const XXH64_hash_t &hashuri=XXH3_64bits_digest(&state);
+
+        const std::string urifolder = binarytoHexa(reinterpret_cast<const char *>(&hashuri),sizeof(hashuri));
+        path+=urifolder;
+    }
 
     if(CurlMulti::curlMulti->pathToCurl.find(path)!=CurlMulti::curlMulti->pathToCurl.cend())
     {
@@ -489,8 +540,9 @@ void Client::dnsRight()
         if(cachefd==-1)
         {
             std::cerr << "can't open cache file " << path << " due to errno: " << errno << std::endl;
-            ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
-            Curl *curl=CurlMulti::curlMulti->download(url.c_str(),path.c_str(),0);
+            if(Cache::hostsubfolder)
+                ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
+            curl=CurlMulti::curlMulti->download(url,path,0);
             curl->addClient(this);//into this call, start open cache and stream if partial have started
         }
         else
@@ -498,7 +550,9 @@ void Client::dnsRight()
             /* cachePath (content header, 64Bits aligned):
              * 64Bits: access time
              * 64Bits: last modification time check
-             * 64Bits: modification time */
+             * 64Bits: http code
+             * 64Bits: modification time
+             */
 
             uint64_t lastModificationTimeCheck=0;
             const off_t &s=lseek(cachefd,1*sizeof(uint64_t),SEEK_SET);
@@ -507,9 +561,16 @@ void Client::dnsRight()
                 if(::read(cachefd,&lastModificationTimeCheck,sizeof(lastModificationTimeCheck))!=sizeof(lastModificationTimeCheck))
                     lastModificationTimeCheck=0;
             }
+            uint64_t http_code=500;
+            const off_t &s2=lseek(cachefd,2*sizeof(uint64_t),SEEK_SET);
+            if(s2!=-1)
+            {
+                if(::read(cachefd,&http_code,sizeof(http_code))!=sizeof(http_code))
+                    http_code=500;
+            }
             //last modification time check <24h or in future to prevent time drift
             const uint64_t &currentTime=time(NULL);
-            if(lastModificationTimeCheck>(currentTime-24*3600))
+            if(lastModificationTimeCheck>(currentTime-Cache::timeToCache(http_code)))
             {
                 const off_t &s=lseek(cachefd,1*sizeof(uint64_t),SEEK_SET);
                 if(s!=-1)
@@ -525,8 +586,9 @@ void Client::dnsRight()
                     return;
                 }
             }
-            mkdir(("cache/"+folder).c_str(),S_IRWXU);
-            Curl *curl=CurlMulti::curlMulti->download(url.c_str(),path.c_str(),cachefd);
+            if(Cache::hostsubfolder)
+                ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
+            curl=CurlMulti::curlMulti->download(url,path,cachefd);
             curl->addClient(this);//into this call, start open cache and stream if partial have started
         }
     }
@@ -596,7 +658,7 @@ void Client::continueRead()
             else
             {
                 partialEndOfFileTrigged=true;
-                std::cout << "End of file, wait more" << std::endl;
+                //std::cout << "End of file, wait more" << std::endl;
             }
             return;
         }
@@ -609,18 +671,10 @@ void Client::continueRead()
     } while(1);
 }
 
-void Client::dnsError()
+void Client::cacheError()
 {
     status=Status_Idle;
-    char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nDns Error";
-    writeOutput(text,sizeof(text)-1);
-    writeEnd();
-}
-
-void Client::dnsWrong()
-{
-    status=Status_Idle;
-    char text[]="Status: 403 Forbidden\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nThis site DNS (AAAA entry) is not into Confiared IPv6 range";
+    char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nCache file rror";
     writeOutput(text,sizeof(text)-1);
     writeEnd();
 }

@@ -14,7 +14,7 @@ class Curl : public EpollObject
 {
 public:
     Curl(const int &cachefd,//0 if no old cache file found
-         const char * const path);
+         const std::string &cachePath);
     ~Curl();
     void parseEvent(const epoll_event &event) override;
     void disconnect();
@@ -27,13 +27,16 @@ public:
     const int64_t &get_mtime() const;
     static std::string timestampsToHttpDate(const int64_t &time);
     void addClient(Client * client);
+    void removeClient(Client * client);
     void curlError(const CURLcode &errorCode);
+    const std::string &getCachePath() const;
 public:
     char error[CURL_ERROR_SIZE];
 private:
     std::vector<Client *> clientsList;
     std::string cachePath;
     Cache *tempCache;
+    Cache *finalCache;
     CURL *easy;
     int act;
     bool parsedHeader;
@@ -42,7 +45,8 @@ private:
     int64_t mtime;
 
     std::string contenttype;
-    uint64_t contentsize;
+    std::string url;
+    int64_t contentsize;
 };
 
 #endif // CURL_H

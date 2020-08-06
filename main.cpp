@@ -5,6 +5,7 @@
 #include "Curl.hpp"
 #include "Dns.hpp"
 #include "CurlMulti.hpp"
+#include "Cache.hpp"
 #include "Timer.hpp"
 #include "Timer/DNSCache.hpp"
 #include "Timer/DNSQuery.hpp"
@@ -36,18 +37,38 @@ int main(int argc, char *argv[])
     }
     mkdir("cache", S_IRWXU);
 
+    std::vector <std::string> sources;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--flatcache") {
+            Cache::hostsubfolder=false;
+        }/* else if (std::string(argv[i]) == "--maxiumSizeToBeSmallFile") {
+            if (i + 1 < argc) { // Make sure we aren't at the end of argv!
+                std::string maxiumSizeToBeSmallFile = argv[i++]; // Increment 'i' so we don't get the argument as the next argv[i].
+
+            } else { // Uh-oh, there was no argument to the destination option.
+                std::cerr << "--maxiumSizeToBeSmallFile option requires one argument." << std::endl;
+                return 1;
+            }
+        } else if (std::string(argv[i]) == "--maxiumSmallFileCacheSize") {
+            if (i + 1 < argc) { // Make sure we aren't at the end of argv!
+                std::string maxiumSmallFileCacheSize = argv[i++]; // Increment 'i' so we don't get the argument as the next argv[i].
+
+            } else { // Uh-oh, there was no argument to the destination option.
+                std::cerr << "--memorycachemap option requires one argument." << std::endl;
+                return 1;
+            }
+        }*/ else if (std::string(argv[i]) == "--help") {
+            std::cerr << "--flatcache: use flat cache, the host cache folder is not created" << std::endl;
+            //std::cerr << "--maxiumSizeToBeSmallFile: (TODO) if smaller than this size, save into memory" << std::endl;
+            //std::cerr << "--maxiumSmallFileCacheSize: (TODO) The maximum content stored in memory, this cache prevent syscall and disk seek" << std::endl;
+            return 1;
+        } else {
+            sources.push_back(argv[i]);
+        }
+    }
+
     (void)argc;
     (void)argv;
-    /*std::unordered_map<std::string,curl *> hashToCurl;
-    std::unordered_map<int,int> fileToSocket;
-    std::unordered_map<curl *,int> curlToSocket;
-    std::unordered_map<curl *,int> futureCurlToSocket;*/
-
-    /*char folderApp[strlen(argv[0])+1];
-    strcpy(folderApp,argv[0]);
-    dirname(folderApp);
-    strcat(folderApp, "/");
-    printf("path=%s\n", folderApp);*/
 
     //the event loop
     struct epoll_event ev, events[MAX_EVENTS];

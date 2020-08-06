@@ -12,23 +12,27 @@
 #include <algorithm>
 #include <sstream>
 
-Curl::Curl(const int &cachefd,//0 if no old cache file found
-           const char * const path) :
+Curl::Curl(const int &cachefd, //0 if no old cache file found
+           const std::string &cachePath) :
+    cachePath(cachePath),
     tempCache(nullptr),
+    finalCache(nullptr),
     easy(curl_easy_init()),
     act(0),
     parsedHeader(false),
     firstWrite(false),
-    contentsize(0)
+    contentsize(-1)
 {
     this->kind=EpollObject::Kind::Kind_Curl;
-    cachePath=std::string(path);
     if(cachefd==0)
+    {
+        //std::cerr << "cachefd==0 then tempCache(nullptr)" << std::endl;
         mtime=0;
+    }
     else
     {
-        tempCache=new Cache(cachefd);
-        mtime=tempCache->modification_time();
+        finalCache=new Cache(cachefd);
+        mtime=finalCache->modification_time();
     }
     /*
     //while receive write to cache
@@ -41,9 +45,15 @@ Curl::Curl(const int &cachefd,//0 if no old cache file found
 Curl::~Curl()
 {
     delete tempCache;
+    tempCache=nullptr;
     //when finish
         //unset curl to all future listener
         //Close all listener
+}
+
+const std::string &Curl::getCachePath() const
+{
+    return cachePath;
 }
 
 const int64_t &Curl::get_mtime() const
@@ -92,7 +102,13 @@ void Curl::disconnectSocket()
         //::close(fd);managed by curl multi
         if(tempCache!=nullptr)
             tempCache->close();
-        rename((cachePath+".tmp").c_str(),cachePath.c_str());
+        if(finalCache!=nullptr)
+            finalCache->close();
+        const char * const cstr=cachePath.c_str();
+        //todo, optimise with renameat2(RENAME_EXCHANGE) if --flatcache + destination
+        ::unlink(cstr);
+        if(!rename((cachePath+".tmp").c_str(),cstr))
+            std::cerr << "unable to move " << cachePath << ".tmp to " << cachePath << ", errno: " << errno << std::endl;
         fd=-1;
     }
 }
@@ -146,11 +162,17 @@ void Curl::addClient(Client * client)
         client->startRead(cachePath+".tmp",true);
 }
 
+void Curl::removeClient(Client * client)
+{
+    auto p=find(clientsList.cbegin(),clientsList.cend(),client);
+    if(p!=clientsList.cend())
+        clientsList.erase(p);
+}
+
 int Curl::write(const void * const data,const size_t &size)
 {
     if(!firstWrite)
     {
-        firstWrite=true;
         long http_code = 0;
         curl_easy_getinfo (easy, CURLINFO_RESPONSE_CODE, &http_code);
         if(http_code==304) //when have header 304 Not Modified
@@ -165,15 +187,44 @@ int Curl::write(const void * const data,const size_t &size)
         if((CURLE_OK != res))
             filetime=0;
         if(tempCache!=nullptr)
+        {
+            tempCache=nullptr;
             delete tempCache;
+        }
         int cachefd=-1;
         std::cerr << "open((cachePath+.tmp).c_str() " << (cachePath+".tmp") << std::endl;
         if((cachefd = open((cachePath+".tmp").c_str(), O_RDWR | O_CREAT | O_TRUNC/* | O_NONBLOCK*/, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH))==-1)
         {
-            std::cerr << "open((cachePath+.tmp).c_str() failed " << (cachePath+".tmp") << " errno " << errno << std::endl;
-            //return internal error
-            return size;
+            if(errno==2)
+            {
+                mkdir("cache/",S_IRWXU);
+                if(Cache::hostsubfolder)
+                {
+                    const std::string::size_type &n=cachePath.rfind("/");
+                    const std::string basePath=cachePath.substr(0,n);
+                    mkdir(basePath.c_str(),S_IRWXU);
+                }
+                if((cachefd = open((cachePath+".tmp").c_str(), O_RDWR | O_CREAT | O_TRUNC/* | O_NONBLOCK*/, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH))==-1)
+                {
+                    std::cerr << "open((cachePath+.tmp).c_str() failed " << (cachePath+".tmp") << " errno " << errno << std::endl;
+                    //return internal error
+                    for(Client * client : clientsList)
+                    {
+                        client->cacheError();
+                        client->disconnect();
+                    }
+                    disconnect();
+                    return -1;
+                }
+            }
+            else
+            {
+                std::cerr << "open((cachePath+.tmp).c_str() failed " << (cachePath+".tmp") << " errno " << errno << std::endl;
+                //return internal error
+                return size;
+            }
         }
+        firstWrite=true;
         /* cachePath (content header, 64Bits aligned):
          * 64Bits: access time
          * 64Bits: last modification time check
@@ -181,18 +232,36 @@ int Curl::write(const void * const data,const size_t &size)
         const int64_t &currentTime=time(NULL);
         ::write(cachefd,&currentTime,sizeof(currentTime));
         ::write(cachefd,&currentTime,sizeof(currentTime));
+        ::write(cachefd,&http_code,sizeof(http_code));
         ::write(cachefd,&filetime,sizeof(filetime));
 
-        std::string header=
-                "Content-Length: "+std::to_string(contentsize)+"\n"
-                "Content-type: "+contenttype+"\n"
-                "Last-Modified: "+timestampsToHttpDate(filetime)+"\n"
+        std::string header;
+        switch(http_code)
+        {
+            case 200:
+            break;
+            case 404:
+            header="Status: 404 NOT FOUND\n";
+            break;
+            default:
+            header="Status: 500 Internal Server Error\n";
+            break;
+        }
+        if(contentsize>=0)
+            header+="Content-Length: "+std::to_string(contentsize)+"\n";
+        if(!contenttype.empty())
+            header+="Content-type: "+contenttype+"\n";
+        else
+            header+="Content-type: text/html\n";
+        if(http_code==200)
+        {
+                header+=+"Last-Modified: "+timestampsToHttpDate(filetime)+"\n"
                 "Date: "+timestampsToHttpDate(currentTime)+"\n"
-                "Expires: "+timestampsToHttpDate(currentTime+24*3600)+"\n"
+                "Expires: "+timestampsToHttpDate(currentTime+Cache::timeToCache(http_code))+"\n"
                 "Cache-Control: public\n"
-                "Access-Control-Allow-Origin: *\n"
-                "\n"
-                ;
+                "Access-Control-Allow-Origin: *\n";
+        }
+        header+="\n";
         if(::write(cachefd,header.data(),header.size())!=(ssize_t)header.size())
             abort();
 
@@ -209,6 +278,11 @@ int Curl::write(const void * const data,const size_t &size)
             client->startRead(cachePath+".tmp",true);
     }
 
+    if(tempCache==nullptr)
+    {
+        //std::cerr << "tempCache==nullptr internal error" << std::endl;
+        return size;
+    }
     const size_t &writedSize=tempCache->write((char *)data,size);
     for(Client * client : clientsList)
         client->tryResumeReadAfterEndOfFile();
@@ -234,9 +308,10 @@ int Curl::header(const void * const data,const size_t &size)
             else if(http_code==304) //when have header 304 Not Modified
             {
                 std::cout << http_code << " http code!, cache already good" << std::endl;
-                tempCache->set_last_modification_time_check(time(NULL));
+                finalCache->set_last_modification_time_check(time(NULL));
                 //send file to listener
-                //break
+                for(Client * client : clientsList)
+                    client->startRead(cachePath,false);
             }
             else
                 std::cout << http_code << " http code error!" << std::endl;
@@ -280,6 +355,6 @@ int Curl::header(const void * const data,const size_t &size)
         contenttype=value;
         return size;
     }
-    std::cout << std::string((const char *)data,size) << std::endl;
+    //std::cout << std::string((const char *)data,size) << std::endl;
     return size;
 }

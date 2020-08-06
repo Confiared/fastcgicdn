@@ -5,6 +5,7 @@
 #include <string>
 
 class Cache;
+class Curl;
 
 class Client : public EpollObject
 {
@@ -16,6 +17,7 @@ public:
 
     void dnsRight();
     void dnsError();
+    void cacheError();
     void dnsWrong();
 
     static inline uint8_t hexToDecUnit(const char& c, bool &ok);
@@ -46,6 +48,7 @@ public:
 private:
     int fastcgiid;
     Cache *readCache;
+    Curl *curl;
     std::string dataToWrite;
     bool fullyParsed;
     bool endTriggered;

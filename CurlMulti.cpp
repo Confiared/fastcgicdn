@@ -90,9 +90,10 @@ void CurlMulti::check_multi_info()
       res = msg->data.result;
       curl_easy_getinfo(easy, CURLINFO_PRIVATE, &curl);
       curl_easy_getinfo(easy, CURLINFO_EFFECTIVE_URL, &eff_url);
-      std::cout << "DONE: " << eff_url << " => (" << res << ") " << curl->error << std::endl;
+      //std::cout << "DONE: " << eff_url << " => (" << res << ") " << curl->error << std::endl;
       curl->curlError(res);
       curl->disconnect();
+      pathToCurl.erase(curl->getCachePath());
       curl_multi_remove_handle(multi, easy);
       curl_easy_cleanup(easy);
       delete curl;
@@ -140,9 +141,9 @@ int CurlMulti::sock_cb(CURL *e, curl_socket_t s, int what, void *cbp, void *sock
     (void)cbp;
     //GlobalInfo *g = (GlobalInfo*) cbp;
     Curl *fdp = (Curl*) sockp;
-    const char *whatstr[]={ "none", "IN", "OUT", "INOUT", "REMOVE" };
+    //const char *whatstr[]={ "none", "IN", "OUT", "INOUT", "REMOVE" };
 
-    std::cout << "socket callback: s=" << s << " e=" << e << " what=" << whatstr[what] << std::endl;
+    //std::cout << "socket callback: s=" << s << " e=" << e << " what=" << whatstr[what] << std::endl;
     if(what == CURL_POLL_REMOVE) {
         std::cout << "REMOVE" << std::endl;
         fdp->disconnectSocket();
@@ -150,19 +151,19 @@ int CurlMulti::sock_cb(CURL *e, curl_socket_t s, int what, void *cbp, void *sock
     }
     else {
         if(!fdp) {
-            std::cout << "2) CURL pointer " << e << std::endl;
-            std::cout << "Adding data: " << whatstr[what] << std::endl;
+            //std::cout << "2) CURL pointer " << e << std::endl;
+            //std::cout << "Adding data: " << whatstr[what] << std::endl;
             if(curl_easy_getinfo(e, CURLINFO_PRIVATE, &fdp)!=CURLE_OK)
                 abort();
-            std::cout << "2) CURL resolved " << fdp << std::endl;
+            //std::cout << "2) CURL resolved " << fdp << std::endl;
             fdp->setsock(s, e, what);
             curl_multi_assign(CurlMulti::curlMulti->multi, s, fdp);
         }
         else {
             if(curl_easy_getinfo(e, CURLINFO_PRIVATE, &fdp)!=CURLE_OK)
                 abort();
-            std::cout << "3) CURL resolved " << fdp << std::endl;
-            std::cout << "Changing action from " << whatstr[fdp->getAction()] << " to " << whatstr[what] << std::endl;
+            //std::cout << "3) CURL resolved " << fdp << std::endl;
+            //std::cout << "Changing action from " << whatstr[fdp->getAction()] << " to " << whatstr[what] << std::endl;
             fdp->setsock(s, e, what);
         }
     }
@@ -210,16 +211,16 @@ void CurlMulti::mcode_or_die(const char *where, CURLMcode code)
 }
 
 /* Create a new easy handle, and add it to the global curl_multi */
-Curl *CurlMulti::download(const char * const url, const char * const cachePath,const int &cachefd/*0 if no old cache file found*/)
+Curl *CurlMulti::download(const std::string &url, const std::string &cachePath,const int &cachefd/*0 if no old cache file found*/)
 {
     Curl *curl=new Curl(cachefd,cachePath);
     CURLMcode rc;
-    curl_easy_setopt(curl->getEasy(), CURLOPT_URL, url);
+    curl_easy_setopt(curl->getEasy(), CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl->getEasy(), CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl->getEasy(), CURLOPT_WRITEDATA, curl);
     curl_easy_setopt(curl->getEasy(), CURLOPT_HEADERFUNCTION, header_cb);
     curl_easy_setopt(curl->getEasy(), CURLOPT_HEADERDATA, curl);
-    curl_easy_setopt(curl->getEasy(), CURLOPT_VERBOSE, 1L);
+    //curl_easy_setopt(curl->getEasy(), CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(curl->getEasy(), CURLOPT_ERRORBUFFER, curl->error);
     if(curl_easy_setopt(curl->getEasy(), CURLOPT_PRIVATE, (void *)curl)!=CURLE_OK)
         abort();

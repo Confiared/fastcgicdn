@@ -358,15 +358,16 @@ void Dns::parseEvent(const epoll_event &event)
 
 void Dns::cleanCache()
 {
+    const std::map<uint64_t/*outdated_date in s from 1970*/,std::vector<std::string>> cacheByOutdatedDate=this->cacheByOutdatedDate;
     for (auto const& x : cacheByOutdatedDate)
     {
         const uint64_t t=x.first;
         if(t>(uint64_t)time(NULL))
             return;
         const std::vector<std::string> &list=x.second;
-        for (auto const& y : list)
-            cache.erase(y);
-        cacheByOutdatedDate.erase(t);
+        for (auto const& host : list)
+            cache.erase(host);
+        this->cacheByOutdatedDate.erase(t);
     }
 }
 
