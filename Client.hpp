@@ -26,6 +26,7 @@ public:
     inline bool canAddToPos(const int &i,const int &size,int &pos);
     inline bool read8Bits(uint8_t &var,const char * const data,const int &size,int &pos);
     inline bool read16Bits(uint16_t &var,const char * const data,const int &size,int &pos);
+    inline bool read24Bits(uint32_t &var,const char * const data,const int &size,int &pos);
     static std::string binarytoHexa(const char * const data, const uint32_t &size);
 
     void readyToWrite();

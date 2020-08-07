@@ -3,6 +3,7 @@
 
 #include <curl/curl.h>
 #include <unordered_map>
+#include <vector>
 #include "EpollObject.hpp"
 
 class Curl;
@@ -28,6 +29,7 @@ public:
     int still_running;
     struct itimerspec its;
     std::unordered_map<std::string,Curl *> pathToCurl;
+    std::vector<Curl *> toRemove;
 };
 
 #endif // CURL_H

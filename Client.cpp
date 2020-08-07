@@ -9,8 +9,7 @@
 //#include <xxhash.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <xxh3.h>
-#include <sstream>
+#include "xxHash/xxh3.h"
 
 #define DEBUGDNS
 static const char* const lut = "0123456789ABCDEF";
@@ -147,7 +146,6 @@ void Client::readyToRead()
 
     /*{
         std::cerr << fd << ") ";
-        const char* const lut = "0123456789ABCDEF";
         for(int i=0;i<size;++i)
         {
             const unsigned char c = buff[i];
@@ -215,12 +213,30 @@ void Client::readyToRead()
             int contentLenghtAbs=contentLenght+pos;
             while(pos<contentLenghtAbs)
             {
-                uint8_t varSize=0;
-                if(!read8Bits(varSize,buff,size,pos))
+                uint32_t varSize=0;
+                uint8_t varSize8=0;
+                if(!read8Bits(varSize8,buff,size,pos))
                     return;
-                uint8_t valSize=0;
-                if(!read8Bits(valSize,buff,size,pos))
+                if(varSize8>127)
+                {
+                    if(!read24Bits(varSize,buff,size,pos))
+                        return;
+                }
+                else
+                    varSize=varSize8;
+
+                uint32_t valSize=0;
+                uint8_t valSize8=0;
+                if(!read8Bits(valSize8,buff,size,pos))
                     return;
+                if(valSize8>127)
+                {
+                    if(!read24Bits(valSize,buff,size,pos))
+                        return;
+                }
+                else
+                    valSize=valSize8;
+
                 switch(varSize)
                 {
                     case 9:
@@ -430,6 +446,20 @@ bool Client::read16Bits(uint16_t &var, const char * const data, const int &size,
     return true;
 }
 
+bool Client::read24Bits(uint32_t &var, const char * const data, const int &size, int &pos)
+{
+    if((pos+(int)sizeof(var)-1)>size)
+    {
+        disconnect();
+        return false;
+    }
+    uint32_t t=0;
+    memcpy(reinterpret_cast<char *>(&t)+1,data+pos,sizeof(var)-1);
+    var=be32toh(t);
+    pos+=sizeof(var)-1;
+    return true;
+}
+
 std::string Client::binarytoHexa(const char * const data, const uint32_t &size)
 {
     std::string output;
@@ -445,7 +475,6 @@ std::string Client::binarytoHexa(const char * const data, const uint32_t &size)
 
 void Client::dnsError()
 {
-    dnsRight();return;
     status=Status_Idle;
     char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nDns Error";
     writeOutput(text,sizeof(text)-1);
@@ -454,7 +483,6 @@ void Client::dnsError()
 
 void Client::dnsWrong()
 {
-    dnsRight();return;
     status=Status_Idle;
     char text[]="Status: 403 Forbidden\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nThis site DNS (AAAA entry) is not into Confiared IPv6 range";
     writeOutput(text,sizeof(text)-1);
@@ -539,7 +567,7 @@ void Client::dnsRight()
         //if failed open cache
         if(cachefd==-1)
         {
-            std::cerr << "can't open cache file " << path << " due to errno: " << errno << std::endl;
+            std::cerr << "can't open cache file " << path << " for " << url << " due to errno: " << errno << std::endl;
             if(Cache::hostsubfolder)
                 ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
             curl=CurlMulti::curlMulti->download(url,path,0);
@@ -746,7 +774,6 @@ void Client::write(const char * const data,const int &size)
             std::cerr << "size: " << size;
         else
         {
-            const char* const lut = "0123456789ABCDEF";
             for(int i=0;i<size;++i)
             {
                 const unsigned char c = data[i];

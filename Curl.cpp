@@ -46,9 +46,11 @@ Curl::~Curl()
 {
     delete tempCache;
     tempCache=nullptr;
-    //when finish
-        //unset curl to all future listener
-        //Close all listener
+    if(fd!=-1)
+        epoll_ctl(epollfd,EPOLL_CTL_DEL, fd, NULL);
+    for(Client * client : clientsList)
+        client->writeEnd();
+    clientsList.clear();
 }
 
 const std::string &Curl::getCachePath() const
@@ -87,6 +89,8 @@ void Curl::disconnect()
 
 void Curl::curlError(const CURLcode &errorCode)
 {
+    if(errorCode==CURLE_OK)
+        return;
     const std::string &errorString(curl_easy_strerror(errorCode));
     for(Client * client : clientsList)
         client->curlError(errorString);
@@ -107,7 +111,7 @@ void Curl::disconnectSocket()
         const char * const cstr=cachePath.c_str();
         //todo, optimise with renameat2(RENAME_EXCHANGE) if --flatcache + destination
         ::unlink(cstr);
-        if(!rename((cachePath+".tmp").c_str(),cstr))
+        if(rename((cachePath+".tmp").c_str(),cstr)==-1)
             std::cerr << "unable to move " << cachePath << ".tmp to " << cachePath << ", errno: " << errno << std::endl;
         fd=-1;
     }

@@ -1,0 +1,140 @@
+Clean DNS cache
+last transfer done, kill timeout
+can't open cache file cache/B00EB354D7B7E02B for https://www.confiared.com/css/style.min.css due to errno: 2
+1) curl pointer 0x87d6b80 to 0x87d6de0
+Adding easy 0x87d6de0 to multi 0x8774ff0 (https://www.confiared.com/css/style.min.css)
+can't open cache file cache/B58888A09A43BF94 for https://www.confiared.com/script/jquery.min.js due to errno: 2
+1) curl pointer 0x87dce30 to 0x87dd090
+Adding easy 0x87dd090 to multi 0x8774ff0 (https://www.confiared.com/script/jquery.min.js)
+can't open cache file cache/157786D000FD6F8B for https://www.confiared.com/script/popper.min.js due to errno: 2
+1) curl pointer 0x87e3100 to 0x87e3360
+Adding easy 0x87e3360 to multi 0x8774ff0 (https://www.confiared.com/script/popper.min.js)
+can't open cache file cache/62788B190D22AF10 for https://www.confiared.com/script/bootstrap.min.js due to errno: 2
+1) curl pointer 0x87e9360 to 0x87e95c0
+Adding easy 0x87e95c0 to multi 0x8774ff0 (https://www.confiared.com/script/bootstrap.min.js)
+can't open cache file cache/8D0DA28988137949 for https://www.confiared.com/images/confiared.png due to errno: 2
+1) curl pointer 0x87ef5d0 to 0x87ef830
+Adding easy 0x87ef830 to multi 0x8774ff0 (https://www.confiared.com/images/confiared.png)
+can't open cache file cache/EDE4A9867BF1B41B for https://www.confiared.com/images/services/security.jpg due to errno: 2
+1) curl pointer 0x88c4970 to 0x88c4bd0
+Adding easy 0x88c4bd0 to multi 0x8774ff0 (https://www.confiared.com/images/services/security.jpg)
+can't open cache file cache/BEE5DC23169AD0A8 for https://www.confiared.com/images/services/optimization.jpg due to errno: 2
+1) curl pointer 0x88cabe0 to 0x88cae40
+Adding easy 0x88cae40 to multi 0x8774ff0 (https://www.confiared.com/images/services/optimization.jpg)
+can't open cache file cache/52D97F975FBE3774 for https://www.confiared.com/images/services/free.jpg due to errno: 2
+1) curl pointer 0x88d0e50 to 0x88d10b0
+Adding easy 0x88d10b0 to multi 0x8774ff0 (https://www.confiared.com/images/services/free.jpg)
+can't open cache file cache/B392DDB2F41113B3 for https://www.confiared.com/images/hardware/fiber.jpg due to errno: 2
+1) curl pointer 0x88d70c0 to 0x88d7320
+Adding easy 0x88d7320 to multi 0x8774ff0 (https://www.confiared.com/images/hardware/fiber.jpg)
+can't open cache file cache/856758DB9912A3EE for https://www.confiared.com/images/hardware/router.jpg due to errno: 2
+1) curl pointer 0x88dd330 to 0x88dd590
+Adding easy 0x88dd590 to multi 0x8774ff0 (https://www.confiared.com/images/hardware/router.jpg)
+can't open cache file cache/A387B42C3CB64FE5 for https://www.confiared.com/images/hardware/iot.jpg due to errno: 2
+1) curl pointer 0x88e35a0 to 0x88e3800
+Adding easy 0x88e3800 to multi 0x8774ff0 (https://www.confiared.com/images/hardware/iot.jpg)
+can't open cache file cache/C09CE22394A404C0 for https://www.confiared.com/images/index/vps.jpg due to errno: 2
+1) curl pointer 0x88e9910 to 0x88e9b70
+Adding easy 0x88e9b70 to multi 0x8774ff0 (https://www.confiared.com/images/index/vps.jpg)
+200 code!
+open((cachePath+.tmp).c_str() cache/B00EB354D7B7E02B.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/B58888A09A43BF94.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/8D0DA28988137949.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/157786D000FD6F8B.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/62788B190D22AF10.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/EDE4A9867BF1B41B.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/BEE5DC23169AD0A8.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/52D97F975FBE3774.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/B392DDB2F41113B3.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/856758DB9912A3EE.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/A387B42C3CB64FE5.tmp
+REMOVE
+200 code!
+open((cachePath+.tmp).c_str() cache/C09CE22394A404C0.tmp
+REMOVE
+last transfer done, kill timeout
+can't open cache file cache/836126B3989DA4D8 for https://www.confiared.com/images/index/a.jpg due to errno: 2
+1) curl pointer 0xb978e50 to 0xb9790b0
+Adding easy 0xb9790b0 to multi 0x8774ff0 (https://www.confiared.com/images/index/a.jpg)
+can't open cache file cache/771DCF93428F5220 for https://www.confiared.com/images/index/services.jpg due to errno: 2
+1) curl pointer 0xb97f0b0 to 0xb97f310
+Adding easy 0xb97f310 to multi 0x8774ff0 (https://www.confiared.com/images/index/services.jpg)
+200 code!
+open((cachePath+.tmp).c_str() cache/836126B3989DA4D8.tmp
+==22673== Invalid read of size 1
+==22673==    at 0x12B385: main (main.cpp:116)
+==22673==  Address 0xb978e5c is 12 bytes inside a block of size 440 free'd
+==22673==    at 0x4836EAB: operator delete(void*) (vg_replace_malloc.c:576)
+==22673==    by 0x115C1B: Curl::~Curl() (Curl.cpp:52)
+==22673==    by 0x11964A: CurlMulti::check_multi_info() (CurlMulti.cpp:100)
+==22673==    by 0x119527: CurlMulti::parseEvent(epoll_event const&) (CurlMulti.cpp:73)
+==22673==    by 0x12B3E0: main (main.cpp:121)
+==22673==  Block was alloc'd at
+==22673==    at 0x4835DEF: operator new(unsigned long) (vg_replace_malloc.c:334)
+==22673==    by 0x119B52: CurlMulti::download(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int const&) (CurlMulti.cpp:217)
+==22673==    by 0x113AB0: Client::dnsRight() (Client.cpp:573)
+==22673==    by 0x11CBE7: Dns::parseEvent(epoll_event const&) (Dns.cpp:326)
+==22673==    by 0x12B502: main (main.cpp:162)
+==22673== 
+==22673== Invalid read of size 8
+==22673==    at 0x12B48E: main (main.cpp:145)
+==22673==  Address 0xb978e50 is 0 bytes inside a block of size 440 free'd
+==22673==    at 0x4836EAB: operator delete(void*) (vg_replace_malloc.c:576)
+==22673==    by 0x115C1B: Curl::~Curl() (Curl.cpp:52)
+==22673==    by 0x11964A: CurlMulti::check_multi_info() (CurlMulti.cpp:100)
+==22673==    by 0x119527: CurlMulti::parseEvent(epoll_event const&) (CurlMulti.cpp:73)
+==22673==    by 0x12B3E0: main (main.cpp:121)
+==22673==  Block was alloc'd at
+==22673==    at 0x4835DEF: operator new(unsigned long) (vg_replace_malloc.c:334)
+==22673==    by 0x119B52: CurlMulti::download(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int const&) (CurlMulti.cpp:217)
+==22673==    by 0x113AB0: Client::dnsRight() (Client.cpp:573)
+==22673==    by 0x11CBE7: Dns::parseEvent(epoll_event const&) (Dns.cpp:326)
+==22673==    by 0x12B502: main (main.cpp:162)
+==22673== 
+pure virtual method called
+terminate called without an active exception
+==22673== 
+==22673== Process terminating with default action of signal 6 (SIGABRT)
+==22673==    at 0x50327BB: raise (raise.c:51)
+==22673==    by 0x501D534: abort (abort.c:79)
+==22673==    by 0x49700AC: __gnu_cxx::__verbose_terminate_handler() (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.22)
+==22673==    by 0x496E065: ??? (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.22)
+==22673==    by 0x496E0B0: std::terminate() (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.22)
+==22673==    by 0x496EB8E: __cxa_pure_virtual (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.22)
+==22673==    by 0x12B4A7: main (main.cpp:145)
+==22673== 
+==22673== HEAP SUMMARY:
+==22673==     in use at exit: 948,799 bytes in 7,037 blocks
+==22673==   total heap usage: 28,362 allocs, 21,325 frees, 9,001,743 bytes allocated
+==22673== 
+==22673== LEAK SUMMARY:
+==22673==    definitely lost: 0 bytes in 0 blocks
+==22673==    indirectly lost: 0 bytes in 0 blocks
+==22673==      possibly lost: 564,252 bytes in 2,208 blocks
+==22673==    still reachable: 384,547 bytes in 4,829 blocks
+==22673==         suppressed: 0 bytes in 0 blocks
+==22673== Rerun with --leak-check=full to see details of leaked memory
+==22673== 
+==22673== For counts of detected and suppressed errors, rerun with: -v
+==22673== ERROR SUMMARY: 2 errors from 2 contexts (suppressed: 0 from 0)
+Aborted

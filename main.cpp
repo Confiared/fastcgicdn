@@ -95,13 +95,21 @@ int main(int argc, char *argv[])
      * 64Bits: modification time */
 
     /*Server *server=*///new Server("/run/fastcgicdn.sock");
-    Server s("/home/user/fastcgicdn.sock");
+    Server s("fastcgicdn.sock");
     (void)s;
+    std::vector<Client *> newDeleteClient,oldDeleteClient;
+    std::vector<Curl *> newDeleteCurl,oldDeleteCurl;
     for (;;) {
         if ((nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1)) == -1)
             printf("epoll_wait error %s", strerror(errno));
-        std::vector<Client *> deleteClient;
-        std::vector<Curl *> deleteCurl;
+        for(Client * client : oldDeleteClient)
+            delete client;
+        for(Curl * curl : oldDeleteCurl)
+            delete curl;
+        oldDeleteClient=newDeleteClient;
+        newDeleteClient.clear();
+        oldDeleteCurl=newDeleteCurl;
+        newDeleteCurl.clear();
         for (int n = 0; n < nfds; ++n)
         {
             epoll_event &e=events[n];
@@ -118,15 +126,15 @@ int main(int argc, char *argv[])
                     Client * client=static_cast<Client *>(e.data.ptr);
                     if(!(e.events & EPOLLHUP))
                     {
-                        /*deleteClient.push_back(client);
-                        client->disconnect();*/
+                        client->disconnect();
+                        newDeleteClient.push_back(client);
                     }
                     else
                         client->parseEvent(e);
                     if(!client->isValid())
                     {
                         //if(!deleteClient.empty() && deleteClient.back()!=client)
-                        deleteClient.push_back(client);
+                        //deleteClient.push_back(client);
                         client->disconnect();
                     }
                 }
@@ -137,7 +145,7 @@ int main(int argc, char *argv[])
                     curl->parseEvent(e);
                     /*delete from CurlMulti::sock_cb() if(!curl->isValid() && deleteCurl.back()!=curl)
                     {
-                        deleteCurl.push_back(curl);
+                        newDeleteCurl.push_back(curl);
                         curl->disconnect();
                     }*/
                 }
@@ -146,6 +154,8 @@ int main(int argc, char *argv[])
                 {
                     CurlMulti * curlMulti=static_cast<CurlMulti *>(e.data.ptr);
                     curlMulti->parseEvent(e);
+                    if(!curlMulti->toRemove.empty())
+                        newDeleteCurl.insert(newDeleteCurl.end(),curlMulti->toRemove.cbegin(),curlMulti->toRemove.cend());
                 }
                 break;
                 case EpollObject::Kind::Kind_Dns:
@@ -164,10 +174,6 @@ int main(int argc, char *argv[])
                 break;
             }
         }
-        for(Client * client : deleteClient)
-            delete client;
-        for(Curl * curl : deleteCurl)
-            delete curl;
     }
 
     return 0;
