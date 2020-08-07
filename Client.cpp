@@ -11,7 +11,6 @@
 #include <sys/stat.h>
 #include "xxHash/xxh3.h"
 
-#define DEBUGDNS
 static const char* const lut = "0123456789ABCDEF";
 
 Client::Client(int cfd) :
@@ -32,6 +31,9 @@ Client::Client(int cfd) :
 
 Client::~Client()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(readCache!=nullptr)
     {
         readCache->close();
@@ -52,6 +54,9 @@ void Client::parseEvent(const epoll_event &event)
 
 void Client::disconnect()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(fd!=-1)
     {
         //std::cerr << fd << " disconnect()" << std::endl;
@@ -128,8 +133,14 @@ std::string Client::hexaToBinary(const std::string &hexa)
 
 void Client::readyToRead()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(fullyParsed)
         return;
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
 
     char buff[4096];
     const int size=read(fd,buff,sizeof(buff));
@@ -158,29 +169,47 @@ void Client::readyToRead()
     do
     {
         if(!read8Bits(var8,buff,size,pos))
+        {
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
+        }
         if(var8!=1)
         {
+            #ifdef DEBUGFASTCGI
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+            #endif
             disconnect();
             return;
         }
         if(!read8Bits(var8,buff,size,pos))
+        {
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
+        }
         if(fastcgiid==-1)
         {
             if(var8!=1)
             {
+                #ifdef DEBUGFASTCGI
+                std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                #endif
                 disconnect();
                 return;
             }
             if(!read16Bits(var16,buff,size,pos))
+            {
+                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                 return;
+            }
             fastcgiid=var16;
         }
         else
         {
             if(var8!=4 && var8!=5)
             {
+                #ifdef DEBUGFASTCGI
+                std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                #endif
                 disconnect();
                 return;
             }
@@ -188,6 +217,9 @@ void Client::readyToRead()
                 return;
             if(fastcgiid!=var16)
             {
+                #ifdef DEBUGFASTCGI
+                std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                #endif
                 disconnect();
                 return;
             }
@@ -195,17 +227,29 @@ void Client::readyToRead()
         uint16_t contentLenght=0;
         uint8_t paddingLength=0;
         if(!read16Bits(contentLenght,buff,size,pos))
+        {
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
+        }
         if(!read8Bits(paddingLength,buff,size,pos))
+        {
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
+        }
         if(!canAddToPos(1,size,pos))
+        {
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
+        }
         switch (var8) {
         //FCGI_BEGIN_REQUEST
         case 1:
             //skip the content length + padding length
             if(!canAddToPos(contentLenght+paddingLength,size,pos))
+            {
+                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                 return;
+            }
         break;
         //FCGI_PARAMS
         case 4:
@@ -216,11 +260,17 @@ void Client::readyToRead()
                 uint32_t varSize=0;
                 uint8_t varSize8=0;
                 if(!read8Bits(varSize8,buff,size,pos))
+                {
+                    std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                     return;
+                }
                 if(varSize8>127)
                 {
                     if(!read24Bits(varSize,buff,size,pos))
+                    {
+                        std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                         return;
+                    }
                 }
                 else
                     varSize=varSize8;
@@ -228,11 +278,17 @@ void Client::readyToRead()
                 uint32_t valSize=0;
                 uint8_t valSize8=0;
                 if(!read8Bits(valSize8,buff,size,pos))
+                {
+                    std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                     return;
+                }
                 if(valSize8>127)
                 {
                     if(!read24Bits(valSize,buff,size,pos))
+                    {
+                        std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                         return;
+                    }
                 }
                 else
                     valSize=valSize8;
@@ -260,17 +316,26 @@ void Client::readyToRead()
                 }
                 //std::cout << std::string(buff+pos,varSize) << ": " << std::string(buff+pos+varSize,valSize) << std::endl;
                 if(!canAddToPos(varSize+valSize,size,pos))
+                {
+                    std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                     return;
+                }
             }
             if(!canAddToPos(paddingLength,size,pos))
+            {
+                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                 return;
+            }
         }
         break;
         //FCGI_STDIN
         case 5:
             //skip the content length + padding length
             if(!canAddToPos(contentLenght+paddingLength,size,pos))
+            {
+                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                 return;
+            }
             fullyParsed=true;
         break;
         default:
@@ -280,6 +345,9 @@ void Client::readyToRead()
 
     if(!fullyParsed)
         return;
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
 
     //check if robots.txt
     if(uri=="/robots.txt")
@@ -390,6 +458,10 @@ void Client::readyToRead()
         std::cout << "downloading: http://" << host << uri << std::endl;*/
     (void)https;
 
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
+
     if(host.empty())
     {
         char text[]="X-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nCDN bad usage: contact@confiared.com";
@@ -413,6 +485,9 @@ bool Client::canAddToPos(const int &i, const int &size, int &pos)
 {
     if((pos+i)>size)
     {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         disconnect();
         return false;
     }
@@ -424,6 +499,9 @@ bool Client::read8Bits(uint8_t &var, const char * const data, const int &size, i
 {
     if((pos+(int)sizeof(var))>size)
     {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         disconnect();
         return false;
     }
@@ -436,6 +514,9 @@ bool Client::read16Bits(uint16_t &var, const char * const data, const int &size,
 {
     if((pos+(int)sizeof(var))>size)
     {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         disconnect();
         return false;
     }
@@ -450,6 +531,9 @@ bool Client::read24Bits(uint32_t &var, const char * const data, const int &size,
 {
     if((pos+(int)sizeof(var)-1)>size)
     {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         disconnect();
         return false;
     }
@@ -475,6 +559,9 @@ std::string Client::binarytoHexa(const char * const data, const uint32_t &size)
 
 void Client::dnsError()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     status=Status_Idle;
     char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nDns Error";
     writeOutput(text,sizeof(text)-1);
@@ -483,6 +570,9 @@ void Client::dnsError()
 
 void Client::dnsWrong()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     status=Status_Idle;
     char text[]="Status: 403 Forbidden\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nThis site DNS (AAAA entry) is not into Confiared IPv6 range";
     writeOutput(text,sizeof(text)-1);
@@ -513,6 +603,9 @@ void Client::dnsRight()
      * Try: Machine Learning Based Cache Algorithm
      * */
 
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     status=Status_WaitTheContent;
     partial=false;
     std::string hostwithprotocol=host;
@@ -624,6 +717,9 @@ void Client::dnsRight()
 
 void Client::startRead()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(!readCache->setContentPos())
     {
         status=Status_Idle;
@@ -638,6 +734,9 @@ void Client::startRead()
 
 void Client::startRead(const std::string &path, const bool &partial)
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     this->partial=partial;
     int cachefd = open(path.c_str(), O_RDWR | O_NOCTTY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     //if failed open cache
@@ -652,6 +751,9 @@ void Client::startRead(const std::string &path, const bool &partial)
     const off_t &s=lseek(cachefd,1*sizeof(uint64_t),SEEK_SET);
     if(s!=-1)
     {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         const uint64_t &currentTime=time(NULL);
         if(readCache!=nullptr)
         {
@@ -666,16 +768,25 @@ void Client::startRead(const std::string &path, const bool &partial)
 
 void Client::tryResumeReadAfterEndOfFile()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(partialEndOfFileTrigged)
         continueRead();
 }
 
 void Client::continueRead()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(readCache==nullptr)
         return;
     if(!dataToWrite.empty())
         return;
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     char buffer[65536-1000];
     do {
         const ssize_t &s=readCache->read(buffer,sizeof(buffer));
@@ -701,6 +812,9 @@ void Client::continueRead()
 
 void Client::cacheError()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     status=Status_Idle;
     char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nCache file rror";
     writeOutput(text,sizeof(text)-1);
@@ -709,11 +823,17 @@ void Client::cacheError()
 
 void Client::readyToWrite()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(!dataToWrite.empty())
     {
         const ssize_t writedSize=::write(fd,dataToWrite.data(),dataToWrite.size());
         if(errno!=0 && errno!=EAGAIN)
         {
+            #ifdef DEBUGFASTCGI
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+            #endif
             disconnect();
             return;
         }
@@ -725,6 +845,9 @@ void Client::readyToWrite()
 
         if(endTriggered==true)
         {
+            #ifdef DEBUGFASTCGI
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+            #endif
             endTriggered=false;
             disconnect();
         }
@@ -736,6 +859,9 @@ void Client::readyToWrite()
 
 void Client::writeOutput(const char * const data,const int &size)
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << ", outputWrited: " << outputWrited << std::endl;
+    #endif
     outputWrited=true;
     uint16_t padding=0;//size-size%16;
     uint16_t paddingbe=htobe16(padding);
@@ -790,6 +916,9 @@ void Client::write(const char * const data,const int &size)
         return;
     else if(errno!=0 && errno!=EAGAIN)
     {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         std::cerr << fd << ") error to write: " << errno << std::endl;
         disconnect();
         return;
@@ -801,6 +930,9 @@ void Client::write(const char * const data,const int &size)
     }
     else
     {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         disconnect();
         return;
     }
@@ -808,6 +940,9 @@ void Client::write(const char * const data,const int &size)
 
 void Client::curlError(const std::string &errorString)
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     const std::string &fullContent=
             "Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nError: "+
             errorString;
@@ -817,6 +952,9 @@ void Client::curlError(const std::string &errorString)
 
 void Client::writeEnd()
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(!outputWrited)
         return;
     if(partial)
@@ -853,7 +991,12 @@ void Client::writeEnd()
 
     fastcgiid=-1;
     if(dataToWrite.empty())
+    {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         disconnect();
+    }
     else
         endTriggered=true;
 }

@@ -126,15 +126,18 @@ int main(int argc, char *argv[])
                     Client * client=static_cast<Client *>(e.data.ptr);
                     if(!(e.events & EPOLLHUP))
                     {
-                        client->disconnect();
-                        newDeleteClient.push_back(client);
+                        #ifdef DEBUGFASTCGI
+                        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                        #endif
+                        /*client->disconnect();
+                        newDeleteClient.push_back(client);*/
                     }
                     else
                         client->parseEvent(e);
                     if(!client->isValid())
                     {
                         //if(!deleteClient.empty() && deleteClient.back()!=client)
-                        //deleteClient.push_back(client);
+                        newDeleteClient.push_back(client);
                         client->disconnect();
                     }
                 }

@@ -214,6 +214,9 @@ int Curl::write(const void * const data,const size_t &size)
                     //return internal error
                     for(Client * client : clientsList)
                     {
+                        #ifdef DEBUGFASTCGI
+                        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                        #endif
                         client->cacheError();
                         client->disconnect();
                     }

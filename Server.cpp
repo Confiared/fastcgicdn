@@ -98,6 +98,9 @@ void Server::parseEvent(const epoll_event &)
         client->readyToRead();
         if(!client->isValid())
         {
+            #ifdef DEBUGFASTCGI
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+            #endif
             client->disconnect();
             delete client;
         }
