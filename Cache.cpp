@@ -36,6 +36,7 @@ void Cache::close()
 {
     if(fd!=-1)
     {
+        epoll_ctl(epollfd,EPOLL_CTL_DEL, fd, NULL);
         ::close(fd);
         fd=-1;
     }

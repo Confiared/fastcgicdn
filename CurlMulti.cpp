@@ -35,8 +35,9 @@ CurlMulti::CurlMulti()
   struct epoll_event ev;
   ev.events = EPOLLIN;
   ev.data.ptr = this;
-  //std::cerr << "EPOLL_CTL_ADD multi: " << fd << std::endl;
-  epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev);
+  std::cerr << "EPOLL_CTL_ADD multi: " << fd << std::endl;
+  if(epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev)==-1)
+      std::cerr << "EPOLL_CTL_ADD multi: " << fd << ", errno: " << errno << std::endl;
 }
 
 CurlMulti::~CurlMulti()

@@ -26,11 +26,12 @@ Curl::Curl(const int &cachefd, //0 if no old cache file found
     this->kind=EpollObject::Kind::Kind_Curl;
     if(cachefd==0)
     {
-        //std::cerr << "cachefd==0 then tempCache(nullptr)" << std::endl;
+        std::cerr << "Curl::Curl()cachefd==0 then tempCache(nullptr): " << this << std::endl;
         mtime=0;
     }
     else
     {
+        std::cerr << "Curl::Curl() cachefd!=0: " << this << std::endl;
         finalCache=new Cache(cachefd);
         mtime=finalCache->modification_time();
     }
@@ -44,10 +45,15 @@ Curl::Curl(const int &cachefd, //0 if no old cache file found
 
 Curl::~Curl()
 {
+    std::cerr << "Curl::~Curl(): " << this << std::endl;
     delete tempCache;
     tempCache=nullptr;
     if(fd!=-1)
-        epoll_ctl(epollfd,EPOLL_CTL_DEL, fd, NULL);
+    {
+        std::cerr << "EPOLL_CTL_DEL curl: " << fd << std::endl;
+        if(epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL)==-1)
+            std::cerr << "EPOLL_CTL_DEL curl: " << fd << ", errno: " << errno << std::endl;
+    }
     for(Client * client : clientsList)
         client->writeEnd();
     clientsList.clear();
@@ -102,7 +108,9 @@ void Curl::disconnectSocket()
 {
     if(fd!=-1)
     {
-        epoll_ctl(epollfd,EPOLL_CTL_DEL, fd, NULL);
+        std::cerr << "EPOLL_CTL_DEL curl: " << fd << std::endl;
+        if(epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL)==-1)
+            std::cerr << "EPOLL_CTL_DEL curl: " << fd << ", errno: " << errno << std::endl;
         //::close(fd);managed by curl multi
         if(tempCache!=nullptr)
             tempCache->close();
@@ -126,6 +134,7 @@ void Curl::setsock(curl_socket_t s, CURL *e, int act)
 
     if(this->fd>0)
     {
+        std::cerr << "EPOLL_CTL_DEL curl: " << fd << std::endl;
         if(epoll_ctl(epollfd, EPOLL_CTL_DEL, this->fd, NULL))
             std::cerr << "EPOLL_CTL_DEL failed for fd: " << this->fd << " : " << errno << std::endl;
     }
@@ -136,7 +145,7 @@ void Curl::setsock(curl_socket_t s, CURL *e, int act)
 
     ev.events = EPOLLIN | EPOLLOUT;
     ev.data.ptr = this;
-    //std::cerr << "EPOLL_CTL_ADD: " << s << std::endl;
+    std::cerr << "EPOLL_CTL_ADD: " << s << " on " << this << std::endl;
     if(epoll_ctl(epollfd, EPOLL_CTL_ADD, s, &ev))
         std::cerr << "EPOLL_CTL_ADD failed for fd: " << s << " : " << errno << std::endl;
 }
