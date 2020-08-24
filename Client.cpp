@@ -559,6 +559,7 @@ std::string Client::binarytoHexa(const char * const data, const uint32_t &size)
 
 void Client::dnsError()
 {
+    dnsRight();return;
     #ifdef DEBUGFASTCGI
     std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
     #endif
@@ -570,6 +571,7 @@ void Client::dnsError()
 
 void Client::dnsWrong()
 {
+    dnsRight();return;
     #ifdef DEBUGFASTCGI
     std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
     #endif
