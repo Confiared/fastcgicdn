@@ -2,9 +2,8 @@
 #include <sys/epoll.h>
 #include "Server.hpp"
 #include "Client.hpp"
-#include "Curl.hpp"
 #include "Dns.hpp"
-#include "CurlMulti.hpp"
+#include "Backend.hpp"
 #include "Cache.hpp"
 #include "Timer.hpp"
 #include "Timer/DNSCache.hpp"
@@ -83,7 +82,6 @@ int main(int argc, char *argv[])
     }
     EpollObject::epollfd=epollfd;
     Dns::dns=new Dns();
-    CurlMulti::curlMulti=new CurlMulti();
     DNSCache dnsCache;
     dnsCache.start(3600*1000);
     DNSQuery dnsQuery;
@@ -98,18 +96,18 @@ int main(int argc, char *argv[])
     Server s("fastcgicdn.sock");
     (void)s;
     std::vector<Client *> newDeleteClient,oldDeleteClient;
-    std::vector<Curl *> newDeleteCurl,oldDeleteCurl;
+    std::vector<Backend *> newDeleteBackend,oldDeleteBackend;
     for (;;) {
         if ((nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1)) == -1)
             printf("epoll_wait error %s", strerror(errno));
         for(Client * client : oldDeleteClient)
             delete client;
-        for(Curl * curl : oldDeleteCurl)
-            delete curl;
+        for(Backend * b : oldDeleteBackend)
+            delete b;
         oldDeleteClient=newDeleteClient;
         newDeleteClient.clear();
-        oldDeleteCurl=newDeleteCurl;
-        newDeleteCurl.clear();
+        oldDeleteBackend=newDeleteBackend;
+        newDeleteBackend.clear();
         for (int n = 0; n < nfds; ++n)
         {
             epoll_event &e=events[n];
@@ -142,23 +140,14 @@ int main(int argc, char *argv[])
                     }
                 }
                 break;
-                case EpollObject::Kind::Kind_Curl:
+                case EpollObject::Kind::Kind_Backend:
                 {
-                    Curl * curl=static_cast<Curl *>(e.data.ptr);
-                    curl->parseEvent(e);
-                    /*delete from CurlMulti::sock_cb() if(!curl->isValid() && deleteCurl.back()!=curl)
-                    {
-                        newDeleteCurl.push_back(curl);
-                        curl->disconnect();
-                    }*/
-                }
-                break;
-                case EpollObject::Kind::Kind_CurlMulti:
-                {
-                    CurlMulti * curlMulti=static_cast<CurlMulti *>(e.data.ptr);
-                    curlMulti->parseEvent(e);
-                    if(!curlMulti->toRemove.empty())
-                        newDeleteCurl.insert(newDeleteCurl.end(),curlMulti->toRemove.cbegin(),curlMulti->toRemove.cend());
+                    Backend * backend=static_cast<Backend *>(e.data.ptr);
+                    backend->parseEvent(e);
+                    /*if(!http->toRemove.empty())
+                        newDeleteHttp.insert(newDeleteHttp.end(),http->toRemove.cbegin(),http->toRemove.cend());*/
+                    if(!backend->isValid())
+                        newDeleteBackend.push_back(backend);
                 }
                 break;
                 case EpollObject::Kind::Kind_Dns:

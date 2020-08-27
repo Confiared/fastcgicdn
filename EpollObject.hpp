@@ -12,13 +12,12 @@ public:
     bool isValid() const;
     enum Kind : uint8_t
     {
-        Kind_Server=0x00,
-        Kind_Client=0x01,
-        Kind_Curl=0x02,
-        Kind_CurlMulti=0x03,
-        Kind_Dns=0x04,
-        Kind_Timer=0x05,
-        Kind_Cache=0x06,
+        Kind_Server,
+        Kind_Client,
+        Kind_Backend,
+        Kind_Dns,
+        Kind_Timer,
+        Kind_Cache,
     };
     virtual void parseEvent(const epoll_event &event) = 0;
     const Kind &getKind() const;

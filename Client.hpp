@@ -3,9 +3,10 @@
 
 #include "EpollObject.hpp"
 #include <string>
+#include <netinet/in.h>
 
 class Cache;
-class Curl;
+class Http;
 
 class Client : public EpollObject
 {
@@ -15,7 +16,7 @@ public:
     void parseEvent(const epoll_event &event) override;
     void disconnect();
 
-    void dnsRight();
+    void dnsRight(const sockaddr_in6 &sIPv6);
     void dnsError();
     void cacheError();
     void dnsWrong();
@@ -33,7 +34,7 @@ public:
     void write(const char * const data,const int &size);
     void writeOutput(const char * const data,const int &size);
     void writeEnd();
-    void curlError(const std::string &errorString);
+    void httpError(const std::string &errorString);
 
     void startRead();
     void startRead(const std::string &path, const bool &partial);
@@ -49,7 +50,7 @@ public:
 private:
     int fastcgiid;
     Cache *readCache;
-    Curl *curl;
+    Http *http;
     std::string dataToWrite;
     bool fullyParsed;
     bool endTriggered;

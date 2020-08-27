@@ -23,8 +23,8 @@ public:
     inline bool read16BitsRaw(uint16_t &var, const char * const data, const int &size, int &pos);
     inline bool read32Bits(uint32_t &var, const char * const data, const int &size, int &pos);
     bool tryOpenSocket(std::string line);
-    bool get(Client * client,const std::string &host);
-    void cancelClient(Client * client,const std::string &host);
+    bool get(Client * client,const std::string &host,const bool &https);
+    void cancelClient(Client * client,const std::string &host,const bool &https);
     int requestCountMerged();
     void cleanCache();
     void checkQueries();
@@ -37,7 +37,7 @@ private:
         StatusEntry_Error=0x02
     };
     struct CacheEntry {
-        //in6_addr sin6_addr;
+        in6_addr sin6_addr;
         uint64_t outdated_date;/*in s from 1970*/
         StatusEntry status;
     };
@@ -57,7 +57,9 @@ private:
 
     struct Query {
         std::string host;
-        std::vector<Client *> clients;
+        //separate http and https to improve performance by better caching socket to open
+        std::vector<Client *> http;
+        std::vector<Client *> https;
         uint8_t retryTime;
         uint64_t nextRetry;
         std::string query;
@@ -68,6 +70,8 @@ private:
     std::map<uint64_t,std::vector<uint16_t>> queryByNextDueTime;
     std::unordered_map<uint16_t,Query> queryList;
     std::unordered_map<std::string,uint16_t> queryListByHost;
+    sockaddr_in6 targetHttp;
+    sockaddr_in6 targetHttps;
 };
 
 #endif // Dns_H

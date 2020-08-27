@@ -23,6 +23,14 @@ Dns *Dns::dns=nullptr;
 
 Dns::Dns()
 {
+    memset(&targetHttp,0,sizeof(targetHttp));
+    targetHttp.sin6_port = htobe16(80);
+    targetHttp.sin6_family = AF_INET6;
+
+    memset(&targetHttps,0,sizeof(targetHttps));
+    targetHttps.sin6_port = htobe16(443);
+    targetHttps.sin6_family = AF_INET6;
+
     clientInProgress=0;
     this->kind=EpollObject::Kind::Kind_Dns;
 
@@ -239,9 +247,10 @@ void Dns::parseEvent(const epoll_event &event)
             if(queryList.find(transactionId)!=queryList.cend())
             {
                 const Query &q=queryList.at(transactionId);
-                const std::vector<Client *> &clients=q.clients;
+                const std::vector<Client *> &http=q.http;
+                const std::vector<Client *> &https=q.https;
                 //std::string hostcpp(std::string hostcpp(q.host));-> not needed
-                if(!clients.empty())
+                if(!http.empty() || !https.empty())
                 {
                     bool clientsFlushed=false;
 
@@ -251,18 +260,22 @@ void Dns::parseEvent(const epoll_event &event)
                         {
                             clientsFlushed=true;
                             //addCacheEntry(StatusEntry_Wrong,0,q.host);-> wrong string to resolve, host is not dns valid
-                            for(Client * const c : clients)
+                            for(Client * const c : http)
+                                c->dnsError();
+                            for(Client * const c : https)
                                 c->dnsError();
                             removeQuery(transactionId);
                         }
                     }
-                    else if((flags & 0xFF0F)!=0x8100)
+                    else if((flags & 0xFA0F)!=0x8000)
                     {
                         if(!clientsFlushed)
                         {
                             clientsFlushed=true;
                             addCacheEntry(StatusEntry_Wrong,0,q.host);
-                            for(Client * const c : clients)
+                            for(Client * const c : http)
+                                c->dnsError();
+                            for(Client * const c : https)
                                 c->dnsError();
                             removeQuery(transactionId);
                         }
@@ -280,7 +293,9 @@ void Dns::parseEvent(const epoll_event &event)
                                 {
                                     clientsFlushed=true;
                                     addCacheEntry(StatusEntry_Error,3600,q.host);
-                                    for(Client * const c : clients)
+                                    for(Client * const c : http)
+                                        c->dnsError();
+                                    for(Client * const c : https)
                                         c->dnsError();
                                     removeQuery(transactionId);
                                 }
@@ -311,7 +326,9 @@ void Dns::parseEvent(const epoll_event &event)
                                         {
                                             clientsFlushed=true;
                                             addCacheEntry(StatusEntry_Wrong,ttl,q.host);
-                                            for(Client * const c : clients)
+                                            for(Client * const c : http)
+                                                c->dnsWrong();
+                                            for(Client * const c : https)
                                                 c->dnsWrong();
                                             removeQuery(transactionId);
                                         }
@@ -322,8 +339,20 @@ void Dns::parseEvent(const epoll_event &event)
                                         {
                                             clientsFlushed=true;
                                             addCacheEntry(StatusEntry_Right,ttl,q.host);
-                                            for(Client * const c : clients)
-                                                c->dnsRight();
+
+                                            if(!http.empty())
+                                            {
+                                                memcpy(&targetHttp.sin6_addr,buffer+pos,16);
+                                                for(Client * const c : http)
+                                                    c->dnsRight(targetHttp);
+                                            }
+                                            if(!https.empty())
+                                            {
+                                                memcpy(&targetHttps.sin6_addr,buffer+pos,16);
+                                                for(Client * const c : https)
+                                                    c->dnsRight(targetHttps);
+                                            }
+
                                             removeQuery(transactionId);
                                         }
                                     }
@@ -345,7 +374,9 @@ void Dns::parseEvent(const epoll_event &event)
                         {
                             clientsFlushed=true;
                             addCacheEntry(StatusEntry_Error,3600,q.host);
-                            for(Client * const c : clients)
+                            for(Client * const c : http)
+                                c->dnsError();
+                            for(Client * const c : https)
                                 c->dnsError();
                             removeQuery(transactionId);
                         }
@@ -458,14 +489,17 @@ bool Dns::read32Bits(uint32_t &var, const char * const data, const int &size, in
     return true;
 }
 
-bool Dns::get(Client * client,const std::string &host)
+bool Dns::get(Client * client, const std::string &host, const bool &https)
 {
     if(queryListByHost.find(host)!=queryListByHost.cend())
     {
         const uint16_t &queryId=queryListByHost.at(host);
         if(queryList.find(queryId)!=queryList.cend())
         {
-            queryList[queryId].clients.push_back(client);
+            if(https)
+                queryList[queryId].https.push_back(client);
+            else
+                queryList[queryId].http.push_back(client);
             return true;
         }
         else //bug, try fix
@@ -484,7 +518,16 @@ bool Dns::get(Client * client,const std::string &host)
             switch(entry.status)
             {
                 case StatusEntry_Right:
-                    client->dnsRight();
+                    if(https)
+                    {
+                        memcpy(&targetHttps.sin6_addr,&entry.sin6_addr,16);
+                        client->dnsRight(targetHttps);
+                    }
+                    else
+                    {
+                        memcpy(&targetHttp.sin6_addr,&entry.sin6_addr,16);
+                        client->dnsRight(targetHttp);
+                    }
                 break;
                 case StatusEntry_Error:
                     client->dnsError();
@@ -561,7 +604,10 @@ bool Dns::get(Client * client,const std::string &host)
     queryToPush.retryTime=0;
     queryToPush.nextRetry=time(NULL)+5;
     queryToPush.query=std::string((char *)buffer,pos);
-    queryToPush.clients.push_back(client);
+    if(https)
+        queryToPush.https.push_back(client);
+    else
+        queryToPush.http.push_back(client);
     addQuery(query->id,queryToPush);
     return true;
 }
@@ -582,29 +628,40 @@ void Dns::removeQuery(const uint16_t &id, const bool &withNextDueTime)
     queryList.erase(id);
 }
 
-void Dns::cancelClient(Client * client,const std::string &host)
+void Dns::cancelClient(Client * client,const std::string &host,const bool &https)
 {
     if(queryListByHost.find(host)!=queryListByHost.cend())
     {
         const uint16_t queryId=queryListByHost.at(host);
         if(queryList.find(queryId)!=queryList.cend())
         {
-            std::vector<Client *> &clients=queryList[queryId].clients;
-            //optimize, less check
-            if(clients.size()<=1)
+            if(https)
             {
-                removeQuery(queryId);
-                return;
-            }
-            unsigned int index=0;
-            while(index<clients.size())
-            {
-                if(client==clients.at(index))
+                std::vector<Client *> &httpsList=queryList[queryId].https;
+                unsigned int index=0;
+                while(index<httpsList.size())
                 {
-                    clients.erase(clients.cbegin()+index);
-                    break;
+                    if(client==httpsList.at(index))
+                    {
+                        httpsList.erase(httpsList.cbegin()+index);
+                        break;
+                    }
+                    index++;
                 }
-                index++;
+            }
+            else
+            {
+                std::vector<Client *> &httpList=queryList[queryId].http;
+                unsigned int index=0;
+                while(index<httpList.size())
+                {
+                    if(client==httpList.at(index))
+                    {
+                        httpList.erase(httpList.cbegin()+index);
+                        break;
+                    }
+                    index++;
+                }
             }
             return;
         }
@@ -642,8 +699,11 @@ void Dns::checkQueries()
             }
             else
             {
-                const std::vector<Client *> &clients=query.clients;
-                for(Client * const c : clients)
+                const std::vector<Client *> &http=query.http;
+                for(Client * const c : http)
+                    c->dnsError();
+                const std::vector<Client *> &https=query.https;
+                for(Client * const c : https)
                     c->dnsError();
                 removeQuery(id);
             }

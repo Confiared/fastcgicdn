@@ -1,8 +1,7 @@
 #include "Client.hpp"
-#include "Curl.hpp"
 #include "Dns.hpp"
 #include "Cache.hpp"
-#include "CurlMulti.hpp"
+#include "Http.hpp"
 #include <unistd.h>
 #include <iostream>
 #include <string.h>
@@ -16,7 +15,7 @@ static const char* const lut = "0123456789ABCDEF";
 Client::Client(int cfd) :
     fastcgiid(-1),
     readCache(nullptr),
-    curl(nullptr),
+    http(nullptr),
     fullyParsed(false),
     endTriggered(false),
     status(Status_Idle),
@@ -40,8 +39,8 @@ Client::~Client()
         delete readCache;
         readCache=nullptr;
     }
-    if(curl)
-        curl->removeClient(this);
+    if(http)
+        http->removeClient(this);
 }
 
 void Client::parseEvent(const epoll_event &event)
@@ -65,11 +64,11 @@ void Client::disconnect()
         ::close(fd);
         fd=-1;
     }
-    if(curl)
-        curl->removeClient(this);
+    if(http)
+        http->removeClient(this);
     dataToWrite.clear();
     if(status==Status_WaitDns)
-        Dns::dns->cancelClient(this,host);
+        Dns::dns->cancelClient(this,host,https);
     fastcgiid=-1;
 }
 
@@ -449,6 +448,26 @@ void Client::readyToRead()
                 }
             }
         }
+        else
+        {
+            const size_t poss=uri.find("/",1);
+            if(poss!=std::string::npos)
+            {
+                if(poss>2)
+                {
+                    host=uri.substr(1,poss-1);
+                    uri=uri.substr(poss);
+                }
+            }
+            else
+            {
+                //std::cerr << "uri '/' not found " << uri << ", host: " << host << std::endl;
+                char text[]="X-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nCDN bad usage: contact@confiared.com";
+                writeOutput(text,sizeof(text)-1);
+                writeEnd();
+                return;
+            }
+        }
     }
 
     //if have request
@@ -471,7 +490,7 @@ void Client::readyToRead()
     }
 
     //get AAAA entry for host
-    if(!Dns::dns->get(this,host))
+    if(!Dns::dns->get(this,host,https))
     {
         char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nOverloaded CDN Dns";
         writeOutput(text,sizeof(text)-1);
@@ -559,7 +578,6 @@ std::string Client::binarytoHexa(const char * const data, const uint32_t &size)
 
 void Client::dnsError()
 {
-    dnsRight();return;
     #ifdef DEBUGFASTCGI
     std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
     #endif
@@ -571,7 +589,6 @@ void Client::dnsError()
 
 void Client::dnsWrong()
 {
-    dnsRight();return;
     #ifdef DEBUGFASTCGI
     std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
     #endif
@@ -581,7 +598,7 @@ void Client::dnsWrong()
     writeEnd();
 }
 
-void Client::dnsRight()
+void Client::dnsRight(const sockaddr_in6 &sIPv6)
 {
     /* Each Hours clean cache (to defined better)
      *
@@ -642,10 +659,10 @@ void Client::dnsRight()
         path+=urifolder;
     }
 
-    if(CurlMulti::curlMulti->pathToCurl.find(path)!=CurlMulti::curlMulti->pathToCurl.cend())
+    if(Http::pathToHttp.find(path)!=Http::pathToHttp.cend())
     {
-        Curl *curl=CurlMulti::curlMulti->pathToCurl.at(path);
-        curl->addClient(this);//into this call, start open cache and stream if partial have started
+        Http *http=Http::pathToHttp.at(path);
+        http->addClient(this);//into this call, start open cache and stream if partial have started
     }
     else
     {
@@ -665,8 +682,28 @@ void Client::dnsRight()
             std::cerr << "can't open cache file " << path << " for " << url << " due to errno: " << errno << std::endl;
             if(Cache::hostsubfolder)
                 ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
-            curl=CurlMulti::curlMulti->download(url,path,0);
-            curl->addClient(this);//into this call, start open cache and stream if partial have started
+
+            if(https)
+            {
+                abort();//todo
+            }
+            else
+            {
+                Http *http=new Http(0, //0 if no old cache file found
+                                      path);
+                if(http->tryConnect(sIPv6,host,uri))
+                {
+                    Http::pathToHttp[path]=http;
+                    http->addClient(this);//into this call, start open cache and stream if partial have started
+                }
+                else
+                {
+                    status=Status_Idle;
+                    char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nSocket Error (1)";
+                    writeOutput(text,sizeof(text)-1);
+                    writeEnd();
+                }
+            }
         }
         else
         {
@@ -711,8 +748,28 @@ void Client::dnsRight()
             }
             if(Cache::hostsubfolder)
                 ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
-            curl=CurlMulti::curlMulti->download(url,path,cachefd);
-            curl->addClient(this);//into this call, start open cache and stream if partial have started
+
+            if(https)
+            {
+                abort();//todo
+            }
+            else
+            {
+                Http *http=new Http(cachefd, //0 if no old cache file found
+                                      path);
+                if(http->tryConnect(sIPv6,host,uri))
+                {
+                    Http::pathToHttp[path]=http;
+                    http->addClient(this);//into this call, start open cache and stream if partial have started
+                }
+                else
+                {
+                    status=Status_Idle;
+                    char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nSocket Error (2)";
+                    writeOutput(text,sizeof(text)-1);
+                    writeEnd();
+                }
+            }
         }
     }
 }
@@ -818,7 +875,7 @@ void Client::cacheError()
     std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
     #endif
     status=Status_Idle;
-    char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nCache file rror";
+    char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nCache file error";
     writeOutput(text,sizeof(text)-1);
     writeEnd();
 }
@@ -940,7 +997,7 @@ void Client::write(const char * const data,const int &size)
     }
 }
 
-void Client::curlError(const std::string &errorString)
+void Client::httpError(const std::string &errorString)
 {
     #ifdef DEBUGFASTCGI
     std::cerr << __FILE__ << ":" << __LINE__ << std::endl;

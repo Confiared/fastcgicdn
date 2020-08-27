@@ -13,15 +13,14 @@ DEFINES += QT_DEPRECATED_WARNINGS
 # In order to do so, uncomment the following line.
 # You can also select to disable deprecated APIs only up to a certain version of Qt.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
-DEFINES += DEBUGFASTCGI DEBUGDNS
-
-LIBS += -lcurl
+#DEFINES += DEBUGFASTCGI
+#DEFINES += DEBUGDNS
 
 SOURCES += main.cpp \
+    Backend.cpp \
     Client.cpp \
-    Curl.cpp \
-    CurlMulti.cpp \
     EpollObject.cpp \
+    Http.cpp \
     Server.cpp \
     Dns.cpp \
     Timer.cpp \
@@ -30,10 +29,10 @@ SOURCES += main.cpp \
     Timer/DNSQuery.cpp
 
 HEADERS += \
+    Backend.hpp \
     Client.hpp \
-    Curl.hpp \
-    CurlMulti.hpp \
     EpollObject.hpp \
+    Http.hpp \
     Server.hpp \
     Dns.hpp \
     Timer.hpp \
