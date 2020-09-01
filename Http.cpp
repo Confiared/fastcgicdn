@@ -2,6 +2,7 @@
 #include "Client.hpp"
 #include "Cache.hpp"
 #include "Backend.hpp"
+#include "Common.hpp"
 #include <iostream>
 #include <cstring>
 #include <unistd.h>
@@ -10,7 +11,13 @@
 #include <algorithm>
 #include <fcntl.h>
 
+//ETag -> If-None-Match
+const char rChar[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+//Todo: limit max file size 9GB
+//reuse cache stale for file <20KB
+
 std::unordered_map<std::string,Http *> Http::pathToHttp;
+int Http::fdRandom=-1;
 char Http::buffer[4096];
 
 Http::Http(const int &cachefd, //0 if no old cache file found
@@ -25,18 +32,16 @@ Http::Http(const int &cachefd, //0 if no old cache file found
     http_code(0),
     parsing(Parsing_None),
     requestSended(false),
-    backend(nullptr)
+    backend(nullptr),
+    contentLengthPos(-1),
+    chunkLength(-1)
 {
     if(cachefd==0)
-    {
         std::cerr << "Http::Http()cachefd==0 then tempCache(nullptr): " << this << std::endl;
-        mtime=0;
-    }
     else
     {
         std::cerr << "Http::Http() cachefd!=0: " << this << std::endl;
         finalCache=new Cache(cachefd);
-        mtime=finalCache->modification_time();
     }
     /*
     //while receive write to cache
@@ -58,10 +63,11 @@ Http::~Http()
     clientsList.clear();
 }
 
-bool Http::tryConnect(const sockaddr_in6 &s,const std::string &host,const std::string &uri)
+bool Http::tryConnect(const sockaddr_in6 &s,const std::string &host,const std::string &uri,const std::string &etag)
 {
     this->host=host;
     this->uri=uri;
+    this->etagBackend=etag;
     return tryConnectInternal(s);
 }
 
@@ -78,19 +84,28 @@ const std::string &Http::getCachePath() const
     return cachePath;
 }
 
-const int64_t &Http::get_mtime() const
-{
-    return mtime;
-}
-
 void Http::sendRequest()
 {
     std::cout << "Http::sendRequest(): " << this << std::endl;
     requestSended=true;
-    std::string h(std::string("GET ")+uri+" HTTP/1.1\nHOST: "+host+"\n\n");
-    socketWrite(h.data(),h.size());
+    if(etagBackend.empty())
+    {
+        std::string h(std::string("GET ")+uri+" HTTP/1.1\nHOST: "+host+"\n\n");
+        socketWrite(h.data(),h.size());
+    }
+    else
+    {
+        std::string h(std::string("GET ")+uri+" HTTP/1.1\nHOST: "+host+"\nIf-None-Match: "+etagBackend+"\n\n");
+        socketWrite(h.data(),h.size());
+    }
     /*used for retry host.clear();
     uri.clear();*/
+}
+
+char Http::randomETagChar(uint8_t r)
+{
+    const auto &l=sizeof(rChar);
+    return rChar[r%l];
 }
 
 void Http::readyToRead()
@@ -155,7 +170,24 @@ void Http::readyToRead()
                     char &c=buffer[pos];
                     if(c==':' && parsing==Parsing_HeaderVar)
                     {
-                        if((pos-pos2)==14)
+                        if((pos-pos2)==4)
+                        {
+                            std::string var(buffer+pos2,pos-pos2);
+                            std::transform(var.begin(), var.end(), var.begin(),[](unsigned char c){return std::tolower(c);});
+                            if(var=="etag")
+                            {
+                                parsing=Parsing_ETag;
+                                pos++;
+                                std::cout << "content-length" << std::endl;
+                            }
+                            else
+                            {
+                                parsing=Parsing_HeaderVal;
+                                //std::cout << "1a) " << std::string(buffer+pos2,pos-pos2) << " (" << pos-pos2 << ")" << std::endl;
+                                pos++;
+                            }
+                        }
+                        else if((pos-pos2)==14)
                         {
                             std::string var(buffer+pos2,pos-pos2);
                             std::transform(var.begin(), var.end(), var.begin(),[](unsigned char c){return std::tolower(c);});
@@ -163,7 +195,7 @@ void Http::readyToRead()
                             {
                                 parsing=Parsing_ContentLength;
                                 pos++;
-                                //std::cout << "content-length" << std::endl;
+                                std::cout << "content-length" << std::endl;
                             }
                             else
                             {
@@ -180,24 +212,7 @@ void Http::readyToRead()
                             {
                                 parsing=Parsing_ContentType;
                                 pos++;
-                                //std::cout << "content-type" << std::endl;
-                            }
-                            else
-                            {
-                                parsing=Parsing_HeaderVal;
-                                //std::cout << "1a) " << std::string(buffer+pos2,pos-pos2) << " (" << pos-pos2 << ")" << std::endl;
-                                pos++;
-                            }
-                        }
-                        else if((pos-pos2)==17)
-                        {
-                            std::string var(buffer+pos2,pos-pos2);
-                            std::transform(var.begin(), var.end(), var.begin(),[](unsigned char c){return std::tolower(c);});
-                            if(var=="transfer-encoding")
-                            {
-                                parsing=Parsing_TransferEncoding;
-                                pos++;
-                                //std::cout << "transfer-encoding" << std::endl;
+                                std::cout << "content-type" << std::endl;
                             }
                             else
                             {
@@ -240,7 +255,7 @@ void Http::readyToRead()
                             else
                                 pos++;
 
-                            long filetime=0;
+                            //long filetime=0;
                     /*        long http_code = 0;
                             Http_easy_getinfo (easy, HttpINFO_RESPONSE_CODE, &http_code);
                             if(http_code==304) //when have header 304 Not Modified
@@ -297,15 +312,23 @@ void Http::readyToRead()
                                 }
                             }
 
-                            /* cachePath (content header, 64Bits aligned):
-                             * 64Bits: access time
-                             * 64Bits: last modification time check
-                             * 64Bits: modification time */
+                            tempCache=new Cache(cachefd);
+                            std::string r;
+                            char randomIndex[6];
+                            read(Http::fdRandom,randomIndex,sizeof(randomIndex));
+                            r+=randomETagChar(randomIndex[r.size()]);
+                            r+=randomETagChar(randomIndex[r.size()]);
+                            r+=randomETagChar(randomIndex[r.size()]);
+                            r+=randomETagChar(randomIndex[r.size()]);
+                            r+=randomETagChar(randomIndex[r.size()]);
+                            r+=randomETagChar(randomIndex[r.size()]);
+
                             const int64_t &currentTime=time(NULL);
-                            ::write(cachefd,&currentTime,sizeof(currentTime));
-                            ::write(cachefd,&currentTime,sizeof(currentTime));
-                            ::write(cachefd,&http_code,sizeof(http_code));
-                            ::write(cachefd,&filetime,sizeof(filetime));
+                            tempCache->set_access_time(currentTime);
+                            tempCache->set_last_modification_time_check(currentTime);
+                            tempCache->set_http_code(http_code);
+                            tempCache->set_ETagFrontend(r);//string of 6 char
+                            tempCache->set_ETagBackend(etagBackend);//at end seek to content pos
 
                             std::string header;
                             switch(http_code)
@@ -321,20 +344,25 @@ void Http::readyToRead()
                             }
                             if(contentsize>=0)
                                 header+="Content-Length: "+std::to_string(contentsize)+"\n";
+                            /*else
+                                header+="Transfer-Encoding: chunked\n";*/
                             if(!contenttype.empty())
-                                header+="Content-type: "+contenttype+"\n";
+                                header+="Content-Type: "+contenttype+"\n";
                             else
-                                header+="Content-type: text/html\n";
+                                header+="Content-Type: text/html\n";
                             if(http_code==200)
                             {
-                                    header+=+"Last-Modified: "+timestampsToHttpDate(filetime)+"\n"
-                                    "Date: "+timestampsToHttpDate(currentTime)+"\n"
-                                    "Expires: "+timestampsToHttpDate(currentTime+Cache::timeToCache(http_code))+"\n"
+                                    header+=
+                                    /*"Date: "+timestampsToHttpDate(currentTime)+"\n"
+                                    "Expires: "+timestampsToHttpDate(currentTime+Cache::timeToCache(http_code))+"\n"*/
                                     "Cache-Control: public\n"
+                                    "ETag: \""+r+"\"\n"
                                     "Access-Control-Allow-Origin: *\n";
                             }
+                            std::cout << "header: " << header << std::endl;
                             header+="\n";
-                            if(::write(cachefd,header.data(),header.size())!=(ssize_t)header.size())
+                            tempCache->seekToContentPos();
+                            if(tempCache->write(header.data(),header.size())!=(ssize_t)header.size())
                                 abort();
 
                             epoll_event event;
@@ -343,7 +371,6 @@ void Http::readyToRead()
                             event.events = EPOLLOUT;
                             //std::cerr << "EPOLL_CTL_ADD bis: " << cachefd << std::endl;
 
-                            tempCache=new Cache(cachefd);
                             //tempCache->setAsync(); -> to hard for now
 
                             for(Client * client : clientsList)
@@ -361,17 +388,14 @@ void Http::readyToRead()
                                     std::istringstream iss(std::string(buffer+pos2,pos-pos2));
                                     iss >> value64;
                                     contentsize=value64;
+                                    std::cout << "content-length: " << value64 << std::endl;
                                 }
                                 break;
                                 case Parsing_ContentType:
                                     contenttype=std::string(buffer+pos2,pos-pos2);
                                 break;
-                                case Parsing_TransferEncoding:
-                                    if(std::string(buffer+pos2,pos-pos2)=="chunked")
-                                    {
-                                        //do client reject
-                                        std::cerr << "Transfer-Encoding: chunked not coded, do client reject" << std::endl;
-                                    }
+                                case Parsing_ETag:
+                                    etagBackend=std::string(buffer+pos2,pos-pos2);
                                 break;
                                 default:
                                 //std::cout << "1b) " << std::string(buffer+pos2,pos-pos2) << std::endl;
@@ -551,7 +575,7 @@ void Http::disconnectBackend()
     if(rename((cachePath+".tmp").c_str(),cstr)==-1)
         std::cerr << "unable to move " << cachePath << ".tmp to " << cachePath << ", errno: " << errno << std::endl;
     //disable to cache
-    ::unlink(cstr);
+    //::unlink(cstr);
 
     backend->downloadFinished();
     std::cerr << this << ": http->backend=null" << std::endl;
@@ -589,14 +613,6 @@ const int &Http::getAction() const
     return act;
 }
 
-std::string Http::timestampsToHttpDate(const int64_t &time)
-{
-    char buffer[100];
-    struct tm *my_tm = gmtime(&time);
-    strftime(buffer, sizeof(buffer), "%a, %d %b %Y %H:%M:%S GMT", my_tm);
-    return buffer;
-}
-
 void Http::addClient(Client * client)
 {
     clientsList.push_back(client);
@@ -621,27 +637,116 @@ void Http::removeClient(Client * client)
         clientsList.erase(p);*/
 }
 
-int Http::write(const void * const data,const size_t &size)
+int Http::write(const char * const data,const size_t &size)
 {
     if(tempCache==nullptr)
     {
         //std::cerr << "tempCache==nullptr internal error" << std::endl;
         return size;
     }
-    const size_t &writedSize=tempCache->write((char *)data,size);
-    for(Client * client : clientsList)
-        client->tryResumeReadAfterEndOfFile();
 
     if(contentsize>=0)
-        contentwritten+=size;
-    if(contentsize<=contentwritten)
     {
-        disconnectFrontend();
-        disconnectBackend();
+        const size_t &writedSize=tempCache->write((char *)data,size);
+        for(Client * client : clientsList)
+            client->tryResumeReadAfterEndOfFile();
+        contentwritten+=size;
+        if(contentsize<=contentwritten)
+        {
+            disconnectFrontend();
+            disconnectBackend();
+        }
+    }
+    else
+    {
+        int pos=0;
+        int pos2=0;
+        //content-length: 5000
+        if(http_code!=0)
+        {
+            while(pos<size)
+            {
+                if(chunkLength>0)
+                {
+                    if(chunkLength>(size-pos))
+                    {
+                        const size_t &writedSize=tempCache->write((char *)data+pos,size-pos);
+                        for(Client * client : clientsList)
+                            client->tryResumeReadAfterEndOfFile();
+                        contentwritten+=size;
+                        pos+=size-pos;
+                        pos2=pos;
+                    }
+                    else
+                    {
+                        const size_t &writedSize=tempCache->write((char *)data+pos,chunkLength);
+                        for(Client * client : clientsList)
+                            client->tryResumeReadAfterEndOfFile();
+                        contentwritten+=chunkLength;
+                        pos+=chunkLength;
+                        pos2=pos;
+                    }
+                    chunkLength=-1;
+                }
+                else
+                {
+                    while((size_t)pos<size)
+                    {
+                        char c=data[pos];
+                        if(c=='\n' || c=='\r')
+                        {
+                            if(pos2==pos)
+                            {
+                                pos++;
+                                pos2=pos;
+                            }
+                            else
+                            {
+                                if(chunkHeader.empty())
+                                    chunkLength=Common::hexaTo64Bits(std::string(data+pos2,pos-pos2));
+                                else
+                                {
+                                    chunkHeader+=std::string(data,pos-1);
+                                    chunkLength=Common::hexaTo64Bits(chunkHeader);
+                                }
+                                if(c=='\r')
+                                {
+                                    pos++;
+                                    char &c2=buffer[pos];
+                                    if(c2=='\n')
+                                        pos++;
+                                }
+                                else
+                                    pos++;
+                                pos2=pos;
+                                break;
+                            }
+                        }
+                        else
+                            pos++;
+                    }
+                    if(chunkLength==0)
+                    {
+                        disconnectFrontend();
+                        disconnectBackend();
+                    }
+                    else if((size_t)pos>=size && chunkLength<0 && pos2<pos)
+                        chunkHeader+=std::string(data+pos2,size-pos2);
+                }
+            }
+        }
     }
 
-    return writedSize;
+    return size;
     //(write partial cache)
     //open to write .tmp (mv at end)
     //std::cout << std::string((const char *)data,size) << std::endl;
+}
+
+std::string Http::timestampsToHttpDate(const int64_t &time)
+{
+    char buffer[100];
+    struct tm *my_tm = gmtime(&time);
+    strftime(buffer, sizeof(buffer), "%a, %d %b %Y %H:%M:%S GMT", my_tm);
+    return buffer;
 }

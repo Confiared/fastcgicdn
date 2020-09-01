@@ -2,6 +2,7 @@
 #include "Dns.hpp"
 #include "Cache.hpp"
 #include "Http.hpp"
+#include "Common.hpp"
 #include <unistd.h>
 #include <iostream>
 #include <string.h>
@@ -10,7 +11,7 @@
 #include <sys/stat.h>
 #include "xxHash/xxh3.h"
 
-static const char* const lut = "0123456789ABCDEF";
+//ETag -> If-None-Match
 
 Client::Client(int cfd) :
     fastcgiid(-1),
@@ -72,64 +73,6 @@ void Client::disconnect()
     fastcgiid=-1;
 }
 
-uint8_t Client::hexToDecUnit(const char& c, bool &ok)
-{
-    if(c<48)
-    {
-        ok=false;
-        return 0;
-    }
-    if(c<=57)
-    {
-        ok=true;
-        return c-48;
-    }
-    if(c<65)
-    {
-        ok=false;
-        return 0;
-    }
-    if(c<=70)
-    {
-        ok=true;
-        return c-65+10;
-    }
-    if(c<97)
-    {
-        ok=false;
-        return 0;
-    }
-    if(c<=102)
-    {
-        ok=true;
-        return c-(uint8_t)97+10;
-    }
-    ok=false;
-    return 0;
-}
-
-std::string Client::hexaToBinary(const std::string &hexa)
-{
-    if(hexa.size()%2!=0)
-        return std::string();
-    std::string r;
-    r.resize(hexa.size()/2);
-    unsigned int index=0;
-    while(index<r.size())
-    {
-        bool ok=true;
-        const uint8_t c1=hexToDecUnit(hexa.at(index*2),ok);
-        if(!ok)
-            return std::string();
-        const uint8_t c2=hexToDecUnit(hexa.at(index*2+1),ok);
-        if(!ok)
-            return std::string();
-        r[index]=c1*16+c2;
-        index++;
-    }
-    return r;
-}
-
 void Client::readyToRead()
 {
     #ifdef DEBUGFASTCGI
@@ -146,6 +89,7 @@ void Client::readyToRead()
     if(size<=0)
         return;
 
+    std::string ifNoneMatch;
     https=false;
     uri.clear();
     host.clear();
@@ -169,7 +113,7 @@ void Client::readyToRead()
     {
         if(!read8Bits(var8,buff,size,pos))
         {
-            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
         }
         if(var8!=1)
@@ -182,7 +126,7 @@ void Client::readyToRead()
         }
         if(!read8Bits(var8,buff,size,pos))
         {
-            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
         }
         if(fastcgiid==-1)
@@ -197,7 +141,7 @@ void Client::readyToRead()
             }
             if(!read16Bits(var16,buff,size,pos))
             {
-                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                 return;
             }
             fastcgiid=var16;
@@ -227,17 +171,17 @@ void Client::readyToRead()
         uint8_t paddingLength=0;
         if(!read16Bits(contentLenght,buff,size,pos))
         {
-            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
         }
         if(!read8Bits(paddingLength,buff,size,pos))
         {
-            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
         }
         if(!canAddToPos(1,size,pos))
         {
-            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+            std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
             return;
         }
         switch (var8) {
@@ -246,7 +190,7 @@ void Client::readyToRead()
             //skip the content length + padding length
             if(!canAddToPos(contentLenght+paddingLength,size,pos))
             {
-                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                 return;
             }
         break;
@@ -260,14 +204,14 @@ void Client::readyToRead()
                 uint8_t varSize8=0;
                 if(!read8Bits(varSize8,buff,size,pos))
                 {
-                    std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+                    std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                     return;
                 }
                 if(varSize8>127)
                 {
                     if(!read24Bits(varSize,buff,size,pos))
                     {
-                        std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+                        std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                         return;
                     }
                 }
@@ -278,14 +222,14 @@ void Client::readyToRead()
                 uint8_t valSize8=0;
                 if(!read8Bits(valSize8,buff,size,pos))
                 {
-                    std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+                    std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                     return;
                 }
                 if(valSize8>127)
                 {
                     if(!read24Bits(valSize,buff,size,pos))
                     {
-                        std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+                        std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                         return;
                     }
                 }
@@ -310,19 +254,23 @@ void Client::readyToRead()
                         if(memcmp(buff+pos+varSize,"https",5)==0)
                             https=true;
                     break;
+                    case 18:
+                    if(memcmp(buff+pos,"HTTP_IF_NONE_MATCH",18)==0 && valSize==8)
+                        ifNoneMatch=std::string(buff+pos+varSize,8);
+                    break;
                     default:
                     break;
                 }
                 //std::cout << std::string(buff+pos,varSize) << ": " << std::string(buff+pos+varSize,valSize) << std::endl;
                 if(!canAddToPos(varSize+valSize,size,pos))
                 {
-                    std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+                    std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                     return;
                 }
             }
             if(!canAddToPos(paddingLength,size,pos))
             {
-                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                 return;
             }
         }
@@ -332,7 +280,7 @@ void Client::readyToRead()
             //skip the content length + padding length
             if(!canAddToPos(contentLenght+paddingLength,size,pos))
             {
-                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
+                std::cerr << __FILE__ << ":" << __LINE__ << " FastCGI protocol error: " << Common::hexaToBinary(std::string(buff,size)) << " " << size << std::endl;
                 return;
             }
             fullyParsed=true;
@@ -391,7 +339,7 @@ void Client::readyToRead()
             if(posb==markb)
             {
                 if(markb>1)
-                    host=hexaToBinary(hostb.substr(0,markb-1));
+                    host=Common::hexaToBinary(hostb.substr(0,markb-1));
                 else if(markb==0)
                 {
                     const size_t poss=uri.find("/",1);
@@ -424,7 +372,7 @@ void Client::readyToRead()
                 if(posb==markb)
                 {
                     if(markb>1)
-                        host=hexaToBinary(hostb.substr(0,markb-1));
+                        host=Common::hexaToBinary(hostb.substr(0,markb-1));
                     else if(markb==0)
                     {
                         const size_t poss=uri.find("/",1);
@@ -475,7 +423,6 @@ void Client::readyToRead()
         std::cout << "downloading: https://" << host << uri << std::endl;
     else
         std::cout << "downloading: http://" << host << uri << std::endl;*/
-    (void)https;
 
     #ifdef DEBUGFASTCGI
     std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
@@ -489,15 +436,129 @@ void Client::readyToRead()
         return;
     }
 
-    //get AAAA entry for host
-    if(!Dns::dns->get(this,host,https))
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
+    status=Status_WaitTheContent;
+    partial=false;
+    std::string hostwithprotocol=host;
+    if(https)
+        hostwithprotocol+="s";
+
+    std::string path("cache/");
+    std::string folder;
+    if(Cache::hostsubfolder)
     {
-        char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nOverloaded CDN Dns";
-        writeOutput(text,sizeof(text)-1);
-        writeEnd();
-        return;
+        const uint32_t &hashhost=static_cast<uint32_t>(XXH3_64bits(hostwithprotocol.data(),hostwithprotocol.size()));
+        const XXH64_hash_t &hashuri=XXH3_64bits(uri.data(),uri.size());
+
+        //do the hash for host to define cache subfolder, hash for uri to file
+
+        //std::string folder;
+        folder = Common::binarytoHexa(reinterpret_cast<const char *>(&hashhost),sizeof(hashhost));
+        path+=folder+"/";
+
+        const std::string urifolder = Common::binarytoHexa(reinterpret_cast<const char *>(&hashuri),sizeof(hashuri));
+        path+=urifolder;
     }
-    status=Status_WaitDns;
+    else
+    {
+        XXH3_state_t state;
+        XXH3_64bits_reset(&state);
+        XXH3_64bits_update(&state, hostwithprotocol.data(),hostwithprotocol.size());
+        XXH3_64bits_update(&state, uri.data(),uri.size());
+        const XXH64_hash_t &hashuri=XXH3_64bits_digest(&state);
+
+        const std::string urifolder = Common::binarytoHexa(reinterpret_cast<const char *>(&hashuri),sizeof(hashuri));
+        path+=urifolder;
+    }
+
+    if(Http::pathToHttp.find(path)!=Http::pathToHttp.cend())
+    {
+        Http *http=Http::pathToHttp.at(path);
+        http->addClient(this);//into this call, start open cache and stream if partial have started
+    }
+    else
+    {
+        std::string url;
+        if(https)
+            url="https://";
+        else
+            url="http://";
+        url+=host;
+        url+=uri;
+        //try open cache
+        //std::cerr << "open((path).c_str() " << path << std::endl;
+        int cachefd = open(path.c_str(), O_RDWR | O_NOCTTY/* | O_NONBLOCK*/, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        //if failed open cache
+        if(cachefd==-1)
+        {
+            std::cerr << "can't open cache file " << path << " for " << url << " due to errno: " << errno << std::endl;
+            if(Cache::hostsubfolder)
+                ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
+
+            //get AAAA entry for host
+            if(!Dns::dns->get(this,host,https))
+            {
+                char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nOverloaded CDN Dns";
+                writeOutput(text,sizeof(text)-1);
+                writeEnd();
+                return;
+            }
+            status=Status_WaitDns;
+        }
+        else
+        {
+            if(!ifNoneMatch.empty())
+            {
+                char bufferETag[6];
+                if(::pread(cachefd,bufferETag,sizeof(bufferETag),2*sizeof(uint64_t)+sizeof(uint16_t))==sizeof(bufferETag))
+                {
+                    if(memcmp(ifNoneMatch.substr(1,6).data(),bufferETag,sizeof(bufferETag))==0)
+                    {
+                        char text[]="Status: 304 Not Modified\r\n\r\n";
+                        writeOutput(text,sizeof(text)-1);
+                        writeEnd();
+                        ::close(cachefd);
+                        return;
+                    }
+                }
+            }
+
+            uint64_t lastModificationTimeCheck=0;
+            if(::pread(cachefd,&lastModificationTimeCheck,sizeof(lastModificationTimeCheck),1*sizeof(uint64_t))!=sizeof(lastModificationTimeCheck))
+                lastModificationTimeCheck=0;
+            uint16_t http_code=500;
+            if(::pread(cachefd,&http_code,sizeof(http_code),2*sizeof(uint64_t))!=sizeof(http_code))
+                http_code=500;
+            //last modification time check <24h or in future to prevent time drift
+            const uint64_t &currentTime=time(NULL);
+            if(lastModificationTimeCheck>(currentTime-Cache::timeToCache(http_code)))
+            {
+                if(readCache!=nullptr)
+                {
+                    delete readCache;
+                    readCache=nullptr;
+                }
+                readCache=new Cache(cachefd);
+                readCache->set_access_time(currentTime);
+                startRead();
+                return;
+            }
+            if(Cache::hostsubfolder)
+                ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
+
+            //get AAAA entry for host
+            if(!Dns::dns->get(this,host,https))
+            {
+                char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nOverloaded CDN Dns";
+                writeOutput(text,sizeof(text)-1);
+                writeEnd();
+                return;
+            }
+            status=Status_WaitDns;
+        }
+    }
 }
 
 bool Client::canAddToPos(const int &i, const int &size, int &pos)
@@ -561,19 +622,6 @@ bool Client::read24Bits(uint32_t &var, const char * const data, const int &size,
     var=be32toh(t);
     pos+=sizeof(var)-1;
     return true;
-}
-
-std::string Client::binarytoHexa(const char * const data, const uint32_t &size)
-{
-    std::string output;
-    //output.reserve(2*size);
-    for(size_t i=0;i<size;++i)
-    {
-        const unsigned char c = data[i];
-        output.push_back(lut[c >> 4]);
-        output.push_back(lut[c & 15]);
-    }
-    return output;
 }
 
 void Client::dnsError()
@@ -641,10 +689,10 @@ void Client::dnsRight(const sockaddr_in6 &sIPv6)
         //do the hash for host to define cache subfolder, hash for uri to file
 
         //std::string folder;
-        folder = binarytoHexa(reinterpret_cast<const char *>(&hashhost),sizeof(hashhost));
+        folder = Common::binarytoHexa(reinterpret_cast<const char *>(&hashhost),sizeof(hashhost));
         path+=folder+"/";
 
-        const std::string urifolder = binarytoHexa(reinterpret_cast<const char *>(&hashuri),sizeof(hashuri));
+        const std::string urifolder = Common::binarytoHexa(reinterpret_cast<const char *>(&hashuri),sizeof(hashuri));
         path+=urifolder;
     }
     else
@@ -655,7 +703,7 @@ void Client::dnsRight(const sockaddr_in6 &sIPv6)
         XXH3_64bits_update(&state, uri.data(),uri.size());
         const XXH64_hash_t &hashuri=XXH3_64bits_digest(&state);
 
-        const std::string urifolder = binarytoHexa(reinterpret_cast<const char *>(&hashuri),sizeof(hashuri));
+        const std::string urifolder = Common::binarytoHexa(reinterpret_cast<const char *>(&hashuri),sizeof(hashuri));
         path+=urifolder;
     }
 
@@ -707,13 +755,6 @@ void Client::dnsRight(const sockaddr_in6 &sIPv6)
         }
         else
         {
-            /* cachePath (content header, 64Bits aligned):
-             * 64Bits: access time
-             * 64Bits: last modification time check
-             * 64Bits: http code
-             * 64Bits: modification time
-             */
-
             uint64_t lastModificationTimeCheck=0;
             const off_t &s=lseek(cachefd,1*sizeof(uint64_t),SEEK_SET);
             if(s!=-1)
@@ -749,6 +790,15 @@ void Client::dnsRight(const sockaddr_in6 &sIPv6)
             if(Cache::hostsubfolder)
                 ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
 
+            std::string etag;
+            uint8_t etagBackendSize=0;
+            if(::pread(cachefd,&etagBackendSize,sizeof(etagBackendSize),3*sizeof(uint64_t))==sizeof(etagBackendSize))
+            {
+                char buffer[etagBackendSize];
+                if(::read(cachefd,buffer,etagBackendSize)==etagBackendSize)
+                    etag=std::string(buffer,etagBackendSize);
+            }
+
             if(https)
             {
                 abort();//todo
@@ -757,7 +807,7 @@ void Client::dnsRight(const sockaddr_in6 &sIPv6)
             {
                 Http *http=new Http(cachefd, //0 if no old cache file found
                                       path);
-                if(http->tryConnect(sIPv6,host,uri))
+                if(http->tryConnect(sIPv6,host,uri,etag))
                 {
                     Http::pathToHttp[path]=http;
                     http->addClient(this);//into this call, start open cache and stream if partial have started
@@ -779,7 +829,7 @@ void Client::startRead()
     #ifdef DEBUGFASTCGI
     std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
     #endif
-    if(!readCache->setContentPos())
+    if(!readCache->seekToContentPos())
     {
         status=Status_Idle;
         char text[]="Status: 500 Internal Server Error\r\nX-Robots-Tag: noindex, nofollow\r\nContent-type: text/plain\r\n\r\nUnable to read cache (1)";
@@ -788,6 +838,7 @@ void Client::startRead()
         return;
     }
     readCache->setAsync();
+    readCache->seekToContentPos();
     continueRead();
 }
 
@@ -822,6 +873,7 @@ void Client::startRead(const std::string &path, const bool &partial)
         readCache=new Cache(cachefd);
         readCache->set_access_time(currentTime);
     }
+    readCache->seekToContentPos();
     startRead();
 }
 
@@ -919,7 +971,7 @@ void Client::readyToWrite()
 void Client::writeOutput(const char * const data,const int &size)
 {
     #ifdef DEBUGFASTCGI
-    std::cerr << __FILE__ << ":" << __LINE__ << ", outputWrited: " << outputWrited << std::endl;
+    std::cerr << __FILE__ << ":" << __LINE__ << ", outputWrited: " << outputWrited << " content: " << std::string(data,size) << std::endl;
     #endif
     outputWrited=true;
     uint16_t padding=0;//size-size%16;

@@ -2,6 +2,7 @@
 #include <sys/epoll.h>
 #include "Server.hpp"
 #include "Client.hpp"
+#include "Http.hpp"
 #include "Dns.hpp"
 #include "Backend.hpp"
 #include "Cache.hpp"
@@ -73,6 +74,8 @@ int main(int argc, char *argv[])
     struct epoll_event ev, events[MAX_EVENTS];
     memset(&ev,0,sizeof(ev));
     int nfds, epollfd;
+
+    Http::fdRandom=open("/dev/urandom",O_RDONLY);
 
     ev.events = EPOLLIN|EPOLLET;
 

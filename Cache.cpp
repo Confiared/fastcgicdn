@@ -8,6 +8,19 @@ bool Cache::hostsubfolder=true;
 uint64_t Cache::maxiumSmallFileCacheSize=0;//diable by default (to be safe if on ram disk)
 uint64_t Cache::smallFileCacheSize=0;*/
 
+//use pread, pwrite
+
+/*Format, insert/drop at middle with sequential scan:
+ * 64Bits: access time
+ * 64Bits: last modification time check (Modification based on ETag)
+ * 16Bits: http code
+ * 48Bits: frontend content Etag, Base64 Random bytes at Creation or Modification
+ * 8Bits: Etag backend size in Bytes
+ * XBytes: backend content (see Etag backend size)
+ * Http Headers ended with \n\n
+ * Http body
+*/
+
 Cache::Cache(const int &fd)
 {
     this->kind=EpollObject::Kind::Kind_Cache;
@@ -42,118 +55,83 @@ void Cache::close()
     }
 }
 
-uint64_t Cache::access_time()
+uint64_t Cache::access_time() const
 {
-    const off_t &s=lseek(fd,0*sizeof(uint64_t),SEEK_SET);
-    if(s!=-1)
-    {
-        uint64_t time=0;
-        if(::read(fd,&time,sizeof(time))==sizeof(time))
-            return time;
-
-    }
+    uint64_t time=0;
+    if(::pread(fd,&time,sizeof(time),0)==sizeof(time))
+        return time;
     return 0;
 }
 
-uint64_t Cache::last_modification_time_check()
+uint64_t Cache::last_modification_time_check() const
 {
-    const off_t &s=lseek(fd,1*sizeof(uint64_t),SEEK_SET);
-    if(s!=-1)
-    {
-        uint64_t time=0;
-        if(::read(fd,&time,sizeof(time))==sizeof(time))
-            return time;
-
-    }
+    uint64_t time=0;
+    if(::pread(fd,&time,sizeof(time),sizeof(uint64_t))==sizeof(time))
+        return time;
     return 0;
 }
 
-uint64_t Cache::modification_time()
+std::string Cache::ETagFrontend() const
 {
-    const off_t &s=lseek(fd,3*sizeof(uint64_t),SEEK_SET);
-    if(s!=-1)
-    {
-        uint64_t time=0;
-        if(::read(fd,&time,sizeof(time))==sizeof(time))
-            return time;
-
-    }
+    char randomIndex[6];
+    if(::pread(fd,randomIndex,sizeof(randomIndex),2*sizeof(uint64_t)+sizeof(uint16_t))==sizeof(randomIndex))
+        return std::string(randomIndex,sizeof(randomIndex));
     return 0;
 }
 
-uint64_t Cache::http_code()
+std::string Cache::ETagBackend() const
 {
-    const off_t &s=lseek(fd,2*sizeof(uint64_t),SEEK_SET);
-    if(s!=-1)
+    uint8_t etagBackendSize=0;
+    if(::pread(fd,&etagBackendSize,sizeof(etagBackendSize),3*sizeof(uint64_t))==sizeof(etagBackendSize))
     {
-        uint64_t time=0;
-        if(::read(fd,&time,sizeof(time))==sizeof(time))
-            return time;
-
+        char buffer[etagBackendSize];
+        if(::read(fd,buffer,etagBackendSize)==etagBackendSize)
+            return std::string(buffer,etagBackendSize);
     }
+    return std::string();
+}
+
+uint16_t Cache::http_code() const
+{
+    uint64_t time=0;
+    if(::pread(fd,&time,sizeof(time),2*sizeof(uint64_t))==sizeof(time))
+        return time;
     return 500;
 }
 
 void Cache::set_access_time(const uint64_t &time)
 {
-    const off_t &s=lseek(fd,0*sizeof(time),SEEK_SET);
-    if(s!=-1)
+    if(::pwrite(fd,&time,sizeof(time),0)!=sizeof(time))
     {
-        if(::write(fd,&time,sizeof(time))!=sizeof(time))
-        {
-            std::cerr << "Unable to write last_modification_time_check" << std::endl;
-            return;
-        }
-    }
-    else
-    {
-        std::cerr << "Unable to seek last_modification_time_check" << std::endl;
+        std::cerr << "Unable to write last_modification_time_check" << std::endl;
         return;
     }
 }
 
 void Cache::set_last_modification_time_check(const uint64_t &time)
 {
-    const off_t &s=lseek(fd,1*sizeof(uint64_t),SEEK_SET);
-    if(s!=-1)
+    if(::pwrite(fd,&time,sizeof(time),sizeof(uint64_t))!=sizeof(time))
     {
-        if(::write(fd,&time,sizeof(time))!=sizeof(time))
-        {
-            std::cerr << "Unable to write last_modification_time_check" << std::endl;
-            return;
-        }
-    }
-    else
-    {
-        std::cerr << "Unable to seek last_modification_time_check" << std::endl;
+        std::cerr << "Unable to write last_modification_time_check" << std::endl;
         return;
     }
 }
 
-void Cache::set_modification_time(const uint64_t &time)
+void Cache::set_ETagFrontend(const std::string &etag)
 {
-    const off_t &s=lseek(fd,3*sizeof(uint64_t),SEEK_SET);
-    if(s!=-1)
+    if((size_t)::pwrite(fd,etag.data(),etag.size(),2*sizeof(uint64_t)+sizeof(uint16_t))!=etag.size())
     {
-        if(::write(fd,&time,sizeof(time))!=sizeof(time))
-        {
-            std::cerr << "Unable to write last_modification_time_check" << std::endl;
-            return;
-        }
-    }
-    else
-    {
-        std::cerr << "Unable to seek last_modification_time_check" << std::endl;
+        std::cerr << "Unable to write last_modification_time_check" << std::endl;
         return;
     }
 }
 
-void Cache::set_http_code(const uint64_t &http_code)
+void Cache::set_ETagBackend(const std::string &etag)//at end seek to content pos
 {
-    const off_t &s=lseek(fd,2*sizeof(uint64_t),SEEK_SET);
-    if(s!=-1)
+    if(etag.size()>255)
     {
-        if(::write(fd,&http_code,sizeof(http_code))!=sizeof(http_code))
+        char c=0x00;
+        if(::pwrite(fd,&c,sizeof(c),3*sizeof(uint64_t))!=sizeof(c))
         {
             std::cerr << "Unable to write last_modification_time_check" << std::endl;
             return;
@@ -161,7 +139,28 @@ void Cache::set_http_code(const uint64_t &http_code)
     }
     else
     {
-        std::cerr << "Unable to seek last_modification_time_check" << std::endl;
+        char c=etag.size();
+        if(::pwrite(fd,&c,sizeof(c),3*sizeof(uint64_t))!=sizeof(c))
+        {
+            std::cerr << "Unable to write last_modification_time_check" << std::endl;
+            return;
+        }
+        if(c>0)
+        {
+            if((size_t)::pwrite(fd,etag.data(),etag.size(),3*sizeof(uint64_t)+sizeof(uint8_t))!=etag.size())
+            {
+                std::cerr << "Unable to write last_modification_time_check" << std::endl;
+                return;
+            }
+        }
+    }
+}
+
+void Cache::set_http_code(const uint16_t &http_code)
+{
+    if(::pwrite(fd,&http_code,sizeof(http_code),2*sizeof(uint64_t))!=sizeof(http_code))
+    {
+        std::cerr << "Unable to write last_modification_time_check" << std::endl;
         return;
     }
 }
@@ -181,15 +180,22 @@ void Cache::setAsync()
     }
 }
 
-bool Cache::setContentPos()
+bool Cache::seekToContentPos()
 {
-    const off_t &s=lseek(fd,4*sizeof(uint64_t),SEEK_SET);
-    if(s==-1)
+    uint8_t etagBackendSize=0;
+    if(::pread(fd,&etagBackendSize,sizeof(etagBackendSize),3*sizeof(uint64_t))==sizeof(etagBackendSize))
     {
-        std::cerr << "Unable to seek setContentPos" << std::endl;
-        return false;
+        const uint16_t &pos=3*sizeof(uint64_t)+sizeof(uint8_t)+etagBackendSize;
+        const off_t &s=lseek(fd,pos,SEEK_SET);
+        if(s==-1)
+        {
+            std::cerr << "Unable to seek setContentPos" << std::endl;
+            return false;
+        }
+        std::cout << "seek to:" << pos << std::endl;
+        return true;
     }
-    return true;
+    return false;
 }
 
 ssize_t Cache::write(const char * const data,const size_t &size)

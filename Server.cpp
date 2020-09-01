@@ -22,6 +22,7 @@ Server::Server(const char *const path)
         abort();
     }
 
+    #ifndef DEBUGFASTCGI
     struct sockaddr_un local;
     local.sun_family = AF_UNIX;
     strcpy(local.sun_path,path);
@@ -60,7 +61,146 @@ Server::Server(const char *const path)
         std::cerr << "epoll_ctl failed to add server: " << errno << std::endl;
         abort();
     }
+    #else
+    if(!tryListenInternal("127.0.0.1","5556"))
+        abort();
+    #endif
 }
+
+#ifdef DEBUGFASTCGI
+bool Server::tryListenInternal(const char* const ip,const char* const port)
+{
+    if(strlen(port)==0)
+    {
+        std::cout << "P2PServer::tryListenInternal() port can't be empty (abort)" << std::endl;
+        abort();
+    }
+
+    struct addrinfo hints;
+    struct addrinfo *result, *rp;
+    int s;
+
+    memset(&hints, 0, sizeof (struct addrinfo));
+    hints.ai_family = AF_UNSPEC;     /* Return IPv4 and IPv6 choices */
+    hints.ai_socktype = SOCK_STREAM; /* We want a TCP socket */
+    hints.ai_flags = AI_PASSIVE;     /* All interfaces */
+
+    if(ip==NULL || ip[0]=='\0')
+        s = getaddrinfo(NULL, port, &hints, &result);
+    else
+        s = getaddrinfo(ip, port, &hints, &result);
+    if (s != 0)
+    {
+        std::cerr << "getaddrinfo:" << gai_strerror(s) << std::endl;
+        return false;
+    }
+
+    rp = result;
+    if(rp == NULL)
+    {
+        std::cerr << "rp == NULL, can't bind" << std::endl;
+        return false;
+    }
+    unsigned int bindSuccess=0,bindFailed=0;
+    while(rp != NULL)
+    {
+        fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if(fd == -1)
+        {
+            std::cerr
+                    << "unable to create the socket: familly: " << rp->ai_family
+                    << ", rp->ai_socktype: " << rp->ai_socktype
+                    << ", rp->ai_protocol: " << rp->ai_protocol
+                    << ", rp->ai_addr: " << rp->ai_addr
+                    << ", rp->ai_addrlen: " << rp->ai_addrlen
+                    << std::endl;
+            continue;
+        }
+
+        int one=1;
+        if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one)!=0)
+            std::cerr << "Unable to apply SO_REUSEADDR" << std::endl;
+        one=1;
+        if(setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one)!=0)
+            std::cerr << "Unable to apply SO_REUSEPORT" << std::endl;
+
+        s = bind(fd, rp->ai_addr, rp->ai_addrlen);
+        if(s!=0)
+        {
+            //unable to bind
+            ::close(fd);
+            std::cerr
+                    << "unable to bind: familly: " << rp->ai_family
+                    << ", rp->ai_socktype: " << rp->ai_socktype
+                    << ", rp->ai_protocol: " << rp->ai_protocol
+                    << ", rp->ai_addr: " << rp->ai_addr
+                    << ", rp->ai_addrlen: " << rp->ai_addrlen
+                    << ", errno: " << std::to_string(errno)
+                    << std::endl;
+            bindFailed++;
+        }
+        else
+        {
+            if(fd==-1)
+            {
+                std::cerr << "Leave without bind but s!=0" << std::endl;
+                return false;
+            }
+
+            int flags = fcntl(fd, F_GETFL, 0);
+            if(flags == -1)
+            {
+                std::cerr << "fcntl get flags error" << std::endl;
+                return false;
+            }
+            flags |= O_NONBLOCK;
+            int s = fcntl(fd, F_SETFL, flags);
+            if(s == -1)
+            {
+                std::cerr << "fcntl set flags error" << std::endl;
+                return false;
+            }
+
+            s = listen(fd, SOMAXCONN);
+            if(s == -1)
+            {
+                ::close(s);
+                std::cerr << "Unable to listen" << std::endl;
+                return false;
+            }
+
+            epoll_event event;
+            event.data.ptr = this;
+            event.events = EPOLLIN | EPOLLOUT | EPOLLET;
+            s = epoll_ctl(epollfd,EPOLL_CTL_ADD, fd, &event);
+            if(s == -1)
+            {
+                ::close(s);
+                std::cerr << "epoll_ctl error" << std::endl;
+                return false;
+            }
+
+            std::cout
+                    << "correctly bind: familly: " << rp->ai_family
+                    << ", rp->ai_socktype: " << rp->ai_socktype
+                    << ", rp->ai_protocol: " << rp->ai_protocol
+                    << ", rp->ai_addr: " << rp->ai_addr
+                    << ", rp->ai_addrlen: " << rp->ai_addrlen
+                    << ", port: " << port
+                    << ", rp->ai_flags: " << rp->ai_flags
+                    //<< ", rp->ai_canonname: " << rp->ai_canonname-> corrupt the output
+                    << std::endl;
+            char hbuf[NI_MAXHOST];
+            if(!getnameinfo(rp->ai_addr, rp->ai_addrlen, hbuf, sizeof(hbuf),NULL, 0, NI_NAMEREQD))
+                std::cout << "getnameinfo: " << hbuf << std::endl;
+            bindSuccess++;
+        }
+        rp = rp->ai_next;
+    }
+    freeaddrinfo (result);
+    return bindSuccess>0;
+}
+#endif
 
 void Server::parseEvent(const epoll_event &)
 {

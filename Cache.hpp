@@ -4,6 +4,7 @@
 #include "EpollObject.hpp"
 
 #include <curl/curl.h>
+#include <string>
 
 class Cache;
 
@@ -13,17 +14,19 @@ public:
     Cache(const int &fd);
     ~Cache();
     void parseEvent(const epoll_event &event) override;
-    uint64_t access_time();
-    uint64_t last_modification_time_check();
-    uint64_t modification_time();
-    uint64_t http_code();
+    uint64_t access_time() const;
+    uint64_t last_modification_time_check() const;
+    uint16_t http_code() const;
+    std::string ETagFrontend() const;//string of 6 char
+    std::string ETagBackend() const;
     void set_access_time(const uint64_t &time);
     void set_last_modification_time_check(const uint64_t &time);
-    void set_modification_time(const uint64_t &time);
-    void set_http_code(const uint64_t &http_code);
+    void set_http_code(const uint16_t &http_code);
+    void set_ETagFrontend(const std::string &etag);//string of 6 char
+    void set_ETagBackend(const std::string &etag);//at end seek to content pos
     void close();
     void setAsync();
-    bool setContentPos();
+    bool seekToContentPos();
     ssize_t write(const char * const data,const size_t &size);
     ssize_t read(char * data,const size_t &size);
     static uint32_t timeToCache(uint16_t http_code);

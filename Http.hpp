@@ -18,17 +18,17 @@ public:
     Http(const int &cachefd,//0 if no old cache file found
          const std::string &cachePath);
     virtual ~Http();
-    bool tryConnect(const sockaddr_in6 &s, const std::string &host, const std::string &uri);
+    bool tryConnect(const sockaddr_in6 &s, const std::string &host, const std::string &uri, const std::string &etagBackend=std::string());
     bool tryConnectInternal(const sockaddr_in6 &s);
     void parseEvent(const epoll_event &event);
+    static char randomETagChar(uint8_t r);
     void sendRequest();
     void readyToRead();
     void readyToWrite();
     void disconnectFrontend();
     void disconnectBackend();
     const int &getAction() const;
-    virtual int write(const void * const data, const size_t &size);
-    const int64_t &get_mtime() const;
+    virtual int write(const char * const data, const size_t &size);
     static std::string timestampsToHttpDate(const int64_t &time);
     void addClient(Client * client);
     void removeClient(Client * client);
@@ -40,6 +40,7 @@ public:
     bool socketWrite(const void *buffer, size_t size);
 public:
     static std::unordered_map<std::string,Http *> pathToHttp;
+    static int fdRandom;
 private:
     static char buffer[4096];
 private:
@@ -49,8 +50,6 @@ private:
     Cache *finalCache;
     int act;
     bool parsedHeader;
-    //if 0 then the cache is tmp file
-    int64_t mtime;
 
     std::string contenttype;
     std::string url;
@@ -65,16 +64,20 @@ private:
         Parsing_HeaderVal,
         Parsing_ContentLength,
         Parsing_ContentType,
-        Parsing_TransferEncoding,
+        Parsing_ETag,
         Parsing_Content
     };
     Parsing parsing;
 
     std::string host;
     std::string uri;
+    std::string etagBackend;
 public:
     bool requestSended;
     Backend *backend;
+    int64_t contentLengthPos;
+    int64_t chunkLength;
+    std::string chunkHeader;
 private:
     sockaddr_in6 m_socket;
 };
