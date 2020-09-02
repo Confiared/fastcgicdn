@@ -85,7 +85,7 @@ std::string Cache::ETagBackend() const
     if(::pread(fd,&etagBackendSize,sizeof(etagBackendSize),3*sizeof(uint64_t))==sizeof(etagBackendSize))
     {
         char buffer[etagBackendSize];
-        if(::read(fd,buffer,etagBackendSize)==etagBackendSize)
+        if(::pread(fd,buffer,etagBackendSize,3*sizeof(uint64_t)+sizeof(uint8_t))==etagBackendSize)
             return std::string(buffer,etagBackendSize);
     }
     return std::string();

@@ -22,10 +22,9 @@ char Http::buffer[4096];
 
 Http::Http(const int &cachefd, //0 if no old cache file found
            const std::string &cachePath) :
-    cachePath(cachePath),
+    cachePath(cachePath),//to remove from Http::pathToHttp
     tempCache(nullptr),
     finalCache(nullptr),
-    act(0),
     parsedHeader(false),
     contentsize(-1),
     contentwritten(0),
@@ -36,6 +35,11 @@ Http::Http(const int &cachefd, //0 if no old cache file found
     contentLengthPos(-1),
     chunkLength(-1)
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    if(cachePath.empty())
+        abort();
+    #endif
     if(cachefd==0)
         std::cerr << "Http::Http()cachefd==0 then tempCache(nullptr): " << this << std::endl;
     else
@@ -82,6 +86,19 @@ bool Http::tryConnectInternal(const sockaddr_in6 &s)
 const std::string &Http::getCachePath() const
 {
     return cachePath;
+}
+
+void Http::resetRequestSended()
+{
+    if(http_code!=0)
+        return;
+    parsedHeader=false;
+    contentsize=-1;
+    contentwritten=0;
+    parsing=Parsing_None;
+    requestSended=false;
+    contentLengthPos=-1;
+    chunkLength=-1;
 }
 
 void Http::sendRequest()
@@ -149,14 +166,24 @@ void Http::readyToRead()
                         {
                             c=0x00;
                             http_code=atoi((char *)fh);
+                            if(backend!=nullptr)
+                                backend->wasTCPConnected=true;
                             if(!HttpReturnCode(http_code))
+                            {
+                                flushRead();
                                 return;
+                            }
                             pos++;
                         }
                     }
                     else
                         pos++;
                 }
+            }
+            if(http_code!=200)
+            {
+                flushRead();
+                return;
             }
             pos++;
 
@@ -353,8 +380,8 @@ void Http::readyToRead()
                             if(http_code==200)
                             {
                                     header+=
-                                    /*"Date: "+timestampsToHttpDate(currentTime)+"\n"
-                                    "Expires: "+timestampsToHttpDate(currentTime+Cache::timeToCache(http_code))+"\n"*/
+                                    "Date: "+timestampsToHttpDate(currentTime)+"\n"
+                                    "Expires: "+timestampsToHttpDate(currentTime+Cache::timeToCache(http_code))+"\n"
                                     "Cache-Control: public\n"
                                     "ETag: \""+r+"\"\n"
                                     "Access-Control-Allow-Origin: *\n";
@@ -511,7 +538,17 @@ void Http::disconnectFrontend()
     clientsList.clear();
     //disconnectSocket();
 
-    pathToHttp.erase(cachePath);
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    if(cachePath.empty())
+        abort();
+    if(Http::pathToHttp.find(cachePath)==Http::pathToHttp.cend())
+    {
+        std::cerr << "Http::pathToHttp.find(" << cachePath << ")==Http::pathToHttp.cend()" << std::endl;
+        abort();
+    }
+    #endif
+    Http::pathToHttp.erase(cachePath);
 
     contenttype.clear();
     url.clear();
@@ -531,7 +568,7 @@ bool Http::HttpReturnCode(const int &errorCode)
         //send file to listener
         for(Client * client : clientsList)
             client->startRead(cachePath,false);
-        return true;
+        return false;
     }
     const std::string &errorString("Http "+std::to_string(errorCode));
     for(Client * client : clientsList)
@@ -539,6 +576,23 @@ bool Http::HttpReturnCode(const int &errorCode)
     clientsList.clear();
     return false;
     //disconnectSocket();
+}
+
+bool Http::backendError(const std::string &errorString)
+{
+    for(Client * client : clientsList)
+        client->httpError(errorString);
+    clientsList.clear();
+    return false;
+    //disconnectSocket();
+}
+
+void Http::flushRead()
+{
+    disconnectBackend();
+    disconnectFrontend();
+    while(socketRead(Http::buffer,sizeof(Http::buffer))==sizeof(Http::buffer))
+    {}
 }
 
 void Http::parseNonHttpError(const Backend::NonHttpError &error)
@@ -565,59 +619,48 @@ void Http::parseNonHttpError(const Backend::NonHttpError &error)
 void Http::disconnectBackend()
 {
     std::cerr << "Http::disconnectBackend() " << this << std::endl;
-    if(tempCache!=nullptr)
-        tempCache->close();
+
     if(finalCache!=nullptr)
         finalCache->close();
     const char * const cstr=cachePath.c_str();
     //todo, optimise with renameat2(RENAME_EXCHANGE) if --flatcache + destination
-    ::unlink(cstr);
-    if(rename((cachePath+".tmp").c_str(),cstr)==-1)
-        std::cerr << "unable to move " << cachePath << ".tmp to " << cachePath << ", errno: " << errno << std::endl;
-    //disable to cache
-    //::unlink(cstr);
+    if(tempCache!=nullptr)
+    {
+        tempCache->close();
+        ::unlink(cstr);
+        if(rename((cachePath+".tmp").c_str(),cstr)==-1)
+            std::cerr << "unable to move " << cachePath << ".tmp to " << cachePath << ", errno: " << errno << std::endl;
+        //disable to cache
+        //::unlink(cstr);
+    }
 
     backend->downloadFinished();
     std::cerr << this << ": http->backend=null" << std::endl;
     backend=nullptr;
-    cachePath.clear();
-}
-
-/* Assign information to a SockInfo structure */
-/*void Http::setsock(Http_socket_t s, Http *e, int act)
-{
-    (void)e;
-    struct epoll_event ev;
-    memset(&ev,1,sizeof(ev));
-
-    if(this->fd>0)
-    {
-        std::cerr << "EPOLL_CTL_DEL Http: " << fd << std::endl;
-        if(epoll_ctl(epollfd, EPOLL_CTL_DEL, this->fd, NULL))
-            std::cerr << "EPOLL_CTL_DEL failed for fd: " << this->fd << " : " << errno << std::endl;
-    }
-
-    this->fd=s;
-    this->act=act;
-    //this->e=e;
-
-    ev.events = EPOLLIN | EPOLLOUT;
-    ev.data.ptr = this;
-    std::cerr << "EPOLL_CTL_ADD: " << s << " on " << this << std::endl;
-    if(epoll_ctl(epollfd, EPOLL_CTL_ADD, s, &ev))
-        std::cerr << "EPOLL_CTL_ADD failed for fd: " << s << " : " << errno << std::endl;
-}*/
-
-const int &Http::getAction() const
-{
-    return act;
 }
 
 void Http::addClient(Client * client)
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    if(cachePath.empty())
+        abort();
+    if(Http::pathToHttp.find(cachePath)==Http::pathToHttp.cend())
+    {
+        std::cerr << "Http::pathToHttp.find(" << cachePath << ")==Http::pathToHttp.cend()" << std::endl;
+        abort();
+    }
+    #endif
     clientsList.push_back(client);
     if(tempCache)
         client->startRead(cachePath+".tmp",true);
+    if(backend==nullptr)
+        abort();
+    else
+    {
+        if(backend->http==nullptr)
+            abort();
+    }
 }
 
 void Http::removeClient(Client * client)
@@ -647,10 +690,18 @@ int Http::write(const char * const data,const size_t &size)
 
     if(contentsize>=0)
     {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         const size_t &writedSize=tempCache->write((char *)data,size);
+        (void)writedSize;
         for(Client * client : clientsList)
             client->tryResumeReadAfterEndOfFile();
         contentwritten+=size;
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        std::cerr << "contentsize: " << contentsize << ", contentwritten: " << contentwritten << std::endl;
+        #endif
         if(contentsize<=contentwritten)
         {
             disconnectFrontend();
@@ -659,18 +710,28 @@ int Http::write(const char * const data,const size_t &size)
     }
     else
     {
-        int pos=0;
-        int pos2=0;
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
+        size_t pos=0;
+        size_t pos2=0;
         //content-length: 5000
         if(http_code!=0)
         {
+            #ifdef DEBUGFASTCGI
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+            #endif
             while(pos<size)
             {
                 if(chunkLength>0)
                 {
-                    if(chunkLength>(size-pos))
+                    #ifdef DEBUGFASTCGI
+                    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                    #endif
+                    if((size_t)chunkLength>(size-pos))
                     {
                         const size_t &writedSize=tempCache->write((char *)data+pos,size-pos);
+                        (void)writedSize;
                         for(Client * client : clientsList)
                             client->tryResumeReadAfterEndOfFile();
                         contentwritten+=size;
@@ -680,6 +741,7 @@ int Http::write(const char * const data,const size_t &size)
                     else
                     {
                         const size_t &writedSize=tempCache->write((char *)data+pos,chunkLength);
+                        (void)writedSize;
                         for(Client * client : clientsList)
                             client->tryResumeReadAfterEndOfFile();
                         contentwritten+=chunkLength;
@@ -690,6 +752,9 @@ int Http::write(const char * const data,const size_t &size)
                 }
                 else
                 {
+                    #ifdef DEBUGFASTCGI
+                    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                    #endif
                     while((size_t)pos<size)
                     {
                         char c=data[pos];
@@ -702,6 +767,9 @@ int Http::write(const char * const data,const size_t &size)
                             }
                             else
                             {
+                                #ifdef DEBUGFASTCGI
+                                std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                                #endif
                                 if(chunkHeader.empty())
                                     chunkLength=Common::hexaTo64Bits(std::string(data+pos2,pos-pos2));
                                 else
@@ -709,6 +777,9 @@ int Http::write(const char * const data,const size_t &size)
                                     chunkHeader+=std::string(data,pos-1);
                                     chunkLength=Common::hexaTo64Bits(chunkHeader);
                                 }
+                                #ifdef DEBUGFASTCGI
+                                std::cerr << "chunkLength: " << chunkLength << std::endl;
+                                #endif
                                 if(c=='\r')
                                 {
                                     pos++;
@@ -725,6 +796,9 @@ int Http::write(const char * const data,const size_t &size)
                         else
                             pos++;
                     }
+                    #ifdef DEBUGFASTCGI
+                    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                    #endif
                     if(chunkLength==0)
                     {
                         disconnectFrontend();

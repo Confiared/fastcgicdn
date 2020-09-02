@@ -43,7 +43,8 @@ private:
     };
     std::unordered_map<std::string,CacheEntry> cache;
     std::map<uint64_t/*outdated_date in s from 1970*/,std::vector<std::string>> cacheByOutdatedDate;
-    void addCacheEntry(const StatusEntry &s,const uint32_t &ttl,const std::string &host);
+    void addCacheEntryFailed(const StatusEntry &s,const uint32_t &ttl,const std::string &host);
+    void addCacheEntry(const StatusEntry &s, const uint32_t &ttl, const std::string &host, const in6_addr &sin6_addr);
 
     sockaddr_in6 targetDnsIPv6;
     sockaddr_in targetDnsIPv4;
@@ -72,6 +73,7 @@ private:
     std::unordered_map<std::string,uint16_t> queryListByHost;
     sockaddr_in6 targetHttp;
     sockaddr_in6 targetHttps;
+    in6_addr sin6_addr;
 };
 
 #endif // Dns_H

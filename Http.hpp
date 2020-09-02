@@ -25,6 +25,7 @@ public:
     void sendRequest();
     void readyToRead();
     void readyToWrite();
+    void flushRead();
     void disconnectFrontend();
     void disconnectBackend();
     const int &getAction() const;
@@ -33,7 +34,9 @@ public:
     void addClient(Client * client);
     void removeClient(Client * client);
     const std::string &getCachePath() const;
+    void resetRequestSended();
     bool HttpReturnCode(const int &errorCode);
+    bool backendError(const std::string &errorString);
     void parseNonHttpError(const Backend::NonHttpError &error);
 
     ssize_t socketRead(void *buffer, size_t size);
@@ -48,7 +51,6 @@ private:
     std::string cachePath;
     Cache *tempCache;
     Cache *finalCache;
-    int act;
     bool parsedHeader;
 
     std::string contenttype;

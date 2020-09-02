@@ -40,6 +40,7 @@ public:
     bool socketWrite(const void *buffer, size_t size);
 public:
     Http *http;
+    bool wasTCPConnected;
 private:
     std::string bufferSocket;
     BackendList * backendList;

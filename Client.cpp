@@ -13,6 +13,10 @@
 
 //ETag -> If-None-Match
 
+#ifdef DEBUGFASTCGI
+#include <arpa/inet.h>
+#endif
+
 Client::Client(int cfd) :
     fastcgiid(-1),
     readCache(nullptr),
@@ -475,6 +479,9 @@ void Client::readyToRead()
 
     if(Http::pathToHttp.find(path)!=Http::pathToHttp.cend())
     {
+        #ifdef DEBUGFASTCGI
+        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+        #endif
         Http *http=Http::pathToHttp.at(path);
         http->addClient(this);//into this call, start open cache and stream if partial have started
     }
@@ -509,6 +516,9 @@ void Client::readyToRead()
         }
         else
         {
+            #ifdef DEBUGFASTCGI
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+            #endif
             if(!ifNoneMatch.empty())
             {
                 char bufferETag[6];
@@ -516,15 +526,22 @@ void Client::readyToRead()
                 {
                     if(memcmp(ifNoneMatch.substr(1,6).data(),bufferETag,sizeof(bufferETag))==0)
                     {
+                        //frontend 304
                         char text[]="Status: 304 Not Modified\r\n\r\n";
                         writeOutput(text,sizeof(text)-1);
                         writeEnd();
                         ::close(cachefd);
+                        #ifdef DEBUGFASTCGI
+                        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                        #endif
                         return;
                     }
                 }
             }
 
+            #ifdef DEBUGFASTCGI
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+            #endif
             uint64_t lastModificationTimeCheck=0;
             if(::pread(cachefd,&lastModificationTimeCheck,sizeof(lastModificationTimeCheck),1*sizeof(uint64_t))!=sizeof(lastModificationTimeCheck))
                 lastModificationTimeCheck=0;
@@ -535,6 +552,9 @@ void Client::readyToRead()
             const uint64_t &currentTime=time(NULL);
             if(lastModificationTimeCheck>(currentTime-Cache::timeToCache(http_code)))
             {
+                #ifdef DEBUGFASTCGI
+                std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                #endif
                 if(readCache!=nullptr)
                 {
                     delete readCache;
@@ -648,29 +668,20 @@ void Client::dnsWrong()
 
 void Client::dnsRight(const sockaddr_in6 &sIPv6)
 {
-    /* Each Hours clean cache (to defined better)
-     *
-     * When site have poor cache hit:
-     * What file remove?
-     * - Used one time + oldest than 1h
-     *
-     * When site have too many file:
-     * While files count > 10000
-     * What file remove?
-     * - smallest (modification - access time)
-     *
-     * When site have too many disk space usage:
-     * While site size > 1% partition size
-     * What file remove?
-     * - biggest: sort(File size/(time()-accesstime))
-     * atime (access time) - The last time the file was accessed/opened by some command or application such as cat , vim or grep .
-     *
-     * Try: 2 list: oldest usage/size
+    /*
+     * 2 list: oldest usage/size
      *
      * Try: Machine Learning Based Cache Algorithm
      * */
 
     #ifdef DEBUGFASTCGI
+    char astring[INET6_ADDRSTRLEN];
+    inet_ntop(AF_INET6, &(sIPv6.sin6_addr), astring, INET6_ADDRSTRLEN);
+    if(std::string(astring)=="::")
+    {
+        std::cerr << "Internal error, try connect on ::" << std::endl;
+        abort();
+    }
     std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
     #endif
     status=Status_WaitTheContent;
@@ -756,36 +767,24 @@ void Client::dnsRight(const sockaddr_in6 &sIPv6)
         else
         {
             uint64_t lastModificationTimeCheck=0;
-            const off_t &s=lseek(cachefd,1*sizeof(uint64_t),SEEK_SET);
-            if(s!=-1)
-            {
-                if(::read(cachefd,&lastModificationTimeCheck,sizeof(lastModificationTimeCheck))!=sizeof(lastModificationTimeCheck))
-                    lastModificationTimeCheck=0;
-            }
-            uint64_t http_code=500;
-            const off_t &s2=lseek(cachefd,2*sizeof(uint64_t),SEEK_SET);
-            if(s2!=-1)
-            {
-                if(::read(cachefd,&http_code,sizeof(http_code))!=sizeof(http_code))
-                    http_code=500;
-            }
+            if(::pread(cachefd,&lastModificationTimeCheck,sizeof(lastModificationTimeCheck),1*sizeof(uint64_t))!=sizeof(lastModificationTimeCheck))
+                lastModificationTimeCheck=0;
+            uint16_t http_code=500;
+            if(::pread(cachefd,&http_code,sizeof(http_code),2*sizeof(uint64_t))!=sizeof(http_code))
+                http_code=500;
             //last modification time check <24h or in future to prevent time drift
             const uint64_t &currentTime=time(NULL);
             if(lastModificationTimeCheck>(currentTime-Cache::timeToCache(http_code)))
             {
-                const off_t &s=lseek(cachefd,1*sizeof(uint64_t),SEEK_SET);
-                if(s!=-1)
+                if(readCache!=nullptr)
                 {
-                    if(readCache!=nullptr)
-                    {
-                        delete readCache;
-                        readCache=nullptr;
-                    }
-                    readCache=new Cache(cachefd);
-                    readCache->set_access_time(currentTime);
-                    startRead();
-                    return;
+                    delete readCache;
+                    readCache=nullptr;
                 }
+                readCache=new Cache(cachefd);
+                readCache->set_access_time(currentTime);
+                startRead();
+                return;
             }
             if(Cache::hostsubfolder)
                 ::mkdir(("cache/"+folder).c_str(),S_IRWXU);
@@ -795,7 +794,7 @@ void Client::dnsRight(const sockaddr_in6 &sIPv6)
             if(::pread(cachefd,&etagBackendSize,sizeof(etagBackendSize),3*sizeof(uint64_t))==sizeof(etagBackendSize))
             {
                 char buffer[etagBackendSize];
-                if(::read(cachefd,buffer,etagBackendSize)==etagBackendSize)
+                if(::pread(cachefd,buffer,etagBackendSize,3*sizeof(uint64_t)+sizeof(uint8_t))==etagBackendSize)
                     etag=std::string(buffer,etagBackendSize);
             }
 

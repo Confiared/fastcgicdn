@@ -9,10 +9,11 @@
 std::unordered_map<std::string,Backend::BackendList *> Backend::addressToHttp;
 std::unordered_map<std::string,Backend::BackendList *> Backend::addressToHttps;
 
-Backend::Backend(BackendList * backendList)
+Backend::Backend(BackendList * backendList) :
+    wasTCPConnected(false),
+    backendList(backendList)
 {
     this->kind=EpollObject::Kind::Kind_Backend;
-    this->backendList=backendList;
 }
 
 Backend::~Backend()
@@ -61,73 +62,105 @@ void Backend::remoteSocketClosed()
         ::close(fd);
         fd=-1;
     }
+    if(http!=nullptr)
+        http->resetRequestSended();
     if(backendList!=nullptr)
     {
-        size_t index=0;
-        while(index<backendList->busy.size())
+        if(!wasTCPConnected)
         {
-            if(backendList->busy.at(index)==this)
+            size_t index=0;
+            while(index<backendList->busy.size())
             {
-                backendList->busy.erase(backendList->busy.cbegin()+index);
-                if(http!=nullptr)
+                if(backendList->busy.at(index)==this)
                 {
-                    /*if(http->requestSended)
-                    {
-                        std::cerr << "reassign but request already send" << std::endl;
-                        http->parseNonHttpError(Backend::NonHttpError_AlreadySend);
-                        return;
-                    }*/
-                    http->requestSended=false;
-                    //reassign to idle backend
-                    if(!backendList->idle.empty())
-                    {
-                        //assign to idle backend and become busy
-                        Backend *backend=backendList->idle.back();
-                        backendList->idle.pop_back();
-                        backendList->busy.push_back(backend);
-                        backend->http=http;
-                        std::cerr << http << ": http->backend=" << backend << std::endl;
-                        http->backend=backend;
-                        http->readyToWrite();
-                    }
-                    //reassign to new backend
-                    else
-                    {
-                        Backend *newBackend=new Backend(backendList);
-                        if(!newBackend->tryConnectInternal(backendList->s))
-                            //todo abort client
-                            return;
-                        newBackend->http=http;
-                        std::cerr << http << ": http->backend=" << newBackend << std::endl;
-                        http->backend=newBackend;
-
-                        backendList->busy.push_back(newBackend);
-                    }
-                    http=nullptr;
-                    return;
+                    backendList->busy.erase(backendList->busy.cbegin()+index);
+                    break;
                 }
-                if(backendList->busy.empty() && backendList->idle.empty() && backendList->pending.empty())
-                {
-                    std::string addr((char *)&backendList->s.sin6_addr,16);
-                    if(backendList->s.sin6_port == htobe16(80))
-                        addressToHttp.erase(addr);
-                    else
-                        addressToHttps.erase(addr);
-                }
-                backendList=nullptr;
-                break;
+                index++;
             }
-            index++;
+            if(!backendList->pending.empty() && backendList->busy.empty())
+            {
+                const std::string error("Tcp connect problem");
+                size_t index=0;
+                while(index<backendList->pending.size())
+                {
+                    Http *http=backendList->pending.at(index);
+                    http->backendError(error);
+                    index++;
+                }
+            }
+            if(http!=nullptr)
+                http->backend=nullptr;
+            return;
         }
-        index=0;
-        while(index<backendList->idle.size())
+        else
         {
-            if(backendList->idle.at(index)==this)
+            size_t index=0;
+            while(index<backendList->busy.size())
             {
-                backendList->idle.erase(backendList->idle.cbegin()+index);
-                break;
+                if(backendList->busy.at(index)==this)
+                {
+                    backendList->busy.erase(backendList->busy.cbegin()+index);
+                    if(http!=nullptr)
+                    {
+                        /*if(http->requestSended)
+                        {
+                            std::cerr << "reassign but request already send" << std::endl;
+                            http->parseNonHttpError(Backend::NonHttpError_AlreadySend);
+                            return;
+                        }*/
+                        http->requestSended=false;
+                        //reassign to idle backend
+                        if(!backendList->idle.empty())
+                        {
+                            //assign to idle backend and become busy
+                            Backend *backend=backendList->idle.back();
+                            backendList->idle.pop_back();
+                            backendList->busy.push_back(backend);
+                            backend->http=http;
+                            std::cerr << http << ": http->backend=" << backend << std::endl;
+                            http->backend=backend;
+                            http->readyToWrite();
+                        }
+                        //reassign to new backend
+                        else
+                        {
+                            Backend *newBackend=new Backend(backendList);
+                            if(!newBackend->tryConnectInternal(backendList->s))
+                                //todo abort client
+                                return;
+                            newBackend->http=http;
+                            std::cerr << http << ": http->backend=" << newBackend << std::endl;
+                            http->backend=newBackend;
+
+                            backendList->busy.push_back(newBackend);
+                        }
+                        http=nullptr;
+                        return;
+                    }
+                    if(backendList->busy.empty() && backendList->idle.empty() && backendList->pending.empty())
+                    {
+                        std::string addr((char *)&backendList->s.sin6_addr,16);
+                        if(backendList->s.sin6_port == htobe16(80))
+                            addressToHttp.erase(addr);
+                        else
+                            addressToHttps.erase(addr);
+                    }
+                    backendList=nullptr;
+                    break;
+                }
+                index++;
             }
-            index++;
+            index=0;
+            while(index<backendList->idle.size())
+            {
+                if(backendList->idle.at(index)==this)
+                {
+                    backendList->idle.erase(backendList->idle.cbegin()+index);
+                    break;
+                }
+                index++;
+            }
         }
     }
 }
@@ -136,6 +169,32 @@ void Backend::downloadFinished()
 {
     if(backendList==nullptr)
         return;
+    if(!wasTCPConnected)
+    {
+        size_t index=0;
+        while(index<backendList->busy.size())
+        {
+            if(backendList->busy.at(index)==this)
+            {
+                backendList->busy.erase(backendList->busy.cbegin()+index);
+                break;
+            }
+            index++;
+        }
+        if(!backendList->pending.empty() && backendList->busy.empty())
+        {
+            const std::string error("Tcp connect problem");
+            size_t index=0;
+            while(index<backendList->pending.size())
+            {
+                Http *http=backendList->pending.at(index);
+                http->backendError(error);
+                index++;
+            }
+        }
+        http->backend=nullptr;
+        return;
+    }
     if(backendList->pending.empty())
     {
         size_t index=0;
@@ -156,10 +215,10 @@ void Backend::downloadFinished()
     {
         std::cerr << http << ": http->backend=null" << std::endl;
         http->backend=nullptr;
-        Http * newHttp=backendList->pending.front();
+        Http * httpToGet=backendList->pending.front();
         backendList->pending.erase(backendList->pending.cbegin());
-        newHttp->backend=this;
-        newHttp->readyToWrite();
+        httpToGet->backend=this;
+        httpToGet->readyToWrite();
     }
 }
 
@@ -243,7 +302,6 @@ bool Backend::tryConnectInternal(const sockaddr_in6 &s)
     /* --------------------------------------------- */
     /* Create a normal socket and connect to server. */
 
-    //for now do it in http1.0
     fd = socket(AF_INET6, SOCK_STREAM, 0);
     if(fd==-1)
     {
@@ -253,7 +311,14 @@ bool Backend::tryConnectInternal(const sockaddr_in6 &s)
 
     char astring[INET6_ADDRSTRLEN];
     inet_ntop(AF_INET6, &(s.sin6_addr), astring, INET6_ADDRSTRLEN);
-    printf("Try connect on %s %i\n", astring, s.sin6_port);
+    #ifdef DEBUGFASTCGI
+    if(std::string(astring)=="::")
+    {
+        std::cerr << "Internal error, try connect on ::" << std::endl;
+        abort();
+    }
+    #endif
+    printf("Try connect on %s %i\n", astring, be16toh(s.sin6_port));
     std::cerr << std::endl;
     std::cout << std::endl;
 

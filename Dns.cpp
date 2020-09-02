@@ -39,6 +39,8 @@ Dns::Dns()
     memset(&targetDnsIPv4, 0, sizeof(targetDnsIPv4));
     targetDnsIPv4.sin_port = htobe16(53);
 
+    memset(&sin6_addr,0,sizeof(sin6_addr));
+
     //read resolv.conf
     {
         FILE * fp;
@@ -272,7 +274,7 @@ void Dns::parseEvent(const epoll_event &event)
                         if(!clientsFlushed)
                         {
                             clientsFlushed=true;
-                            addCacheEntry(StatusEntry_Wrong,0,q.host);
+                            addCacheEntryFailed(StatusEntry_Wrong,0,q.host);
                             for(Client * const c : http)
                                 c->dnsError();
                             for(Client * const c : https)
@@ -292,7 +294,7 @@ void Dns::parseEvent(const epoll_event &event)
                                 if(!clientsFlushed)
                                 {
                                     clientsFlushed=true;
-                                    addCacheEntry(StatusEntry_Error,3600,q.host);
+                                    addCacheEntryFailed(StatusEntry_Error,3600,q.host);
                                     for(Client * const c : http)
                                         c->dnsError();
                                     for(Client * const c : https)
@@ -325,7 +327,7 @@ void Dns::parseEvent(const epoll_event &event)
                                         if(!clientsFlushed)
                                         {
                                             clientsFlushed=true;
-                                            addCacheEntry(StatusEntry_Wrong,ttl,q.host);
+                                            addCacheEntry(StatusEntry_Wrong,ttl,q.host,*reinterpret_cast<in6_addr *>(buffer+pos));
                                             for(Client * const c : http)
                                                 c->dnsWrong();
                                             for(Client * const c : https)
@@ -338,7 +340,7 @@ void Dns::parseEvent(const epoll_event &event)
                                         if(!clientsFlushed)
                                         {
                                             clientsFlushed=true;
-                                            addCacheEntry(StatusEntry_Right,ttl,q.host);
+                                            addCacheEntry(StatusEntry_Right,ttl,q.host,*reinterpret_cast<in6_addr *>(buffer+pos));
 
                                             if(!http.empty())
                                             {
@@ -373,7 +375,7 @@ void Dns::parseEvent(const epoll_event &event)
                         if(!clientsFlushed)
                         {
                             clientsFlushed=true;
-                            addCacheEntry(StatusEntry_Error,3600,q.host);
+                            addCacheEntryFailed(StatusEntry_Error,3600,q.host);
                             for(Client * const c : http)
                                 c->dnsError();
                             for(Client * const c : https)
@@ -402,7 +404,19 @@ void Dns::cleanCache()
     }
 }
 
-void Dns::addCacheEntry(const StatusEntry &s,const uint32_t &ttl,const std::string &host)
+void Dns::addCacheEntryFailed(const StatusEntry &s,const uint32_t &ttl,const std::string &host)
+{
+    #ifdef DEBUGFASTCGI
+    if(s==StatusEntry_Right)
+    {
+        std::cerr << "Can't call right without IP" << std::endl;
+        abort();
+    }
+    #endif
+    addCacheEntry(s,ttl,host,sin6_addr);
+}
+
+void Dns::addCacheEntry(const StatusEntry &s,const uint32_t &ttl,const std::string &host,const in6_addr &sin6_addr)
 {
     //prevent DDOS due to out of memory situation
     if(cache.size()>5000)
@@ -438,7 +452,21 @@ void Dns::addCacheEntry(const StatusEntry &s,const uint32_t &ttl,const std::stri
     else
         entry.outdated_date=time(NULL)+24*3600;
     entry.status=s;
-    //memcpy(entry.sin6_addr,buffer+pos,sizeof(in6_addr));
+
+    #ifdef DEBUGFASTCGI
+    if(s==StatusEntry_Right)
+    {
+        char astring[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, &(sin6_addr), astring, INET6_ADDRSTRLEN);
+        if(std::string(astring)=="::")
+        {
+            std::cerr << "Internal error, try connect on ::" << std::endl;
+            abort();
+        }
+    }
+    #endif
+
+    memcpy(&entry.sin6_addr,&sin6_addr,sizeof(in6_addr));
 
     //insert entry to cacheByOutdatedDate
     cacheByOutdatedDate[entry.outdated_date].push_back(host);
@@ -491,6 +519,9 @@ bool Dns::read32Bits(uint32_t &var, const char * const data, const int &size, in
 
 bool Dns::get(Client * client, const std::string &host, const bool &https)
 {
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(queryListByHost.find(host)!=queryListByHost.cend())
     {
         const uint16_t &queryId=queryListByHost.at(host);
@@ -505,6 +536,9 @@ bool Dns::get(Client * client, const std::string &host, const bool &https)
         else //bug, try fix
             queryListByHost.erase(host);
     }
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(cache.find(host)!=cache.cend())
     {
         CacheEntry &entry=cache.at(host);
@@ -520,26 +554,41 @@ bool Dns::get(Client * client, const std::string &host, const bool &https)
                 case StatusEntry_Right:
                     if(https)
                     {
+                        #ifdef DEBUGFASTCGI
+                        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                        #endif
                         memcpy(&targetHttps.sin6_addr,&entry.sin6_addr,16);
                         client->dnsRight(targetHttps);
                     }
                     else
                     {
+                        #ifdef DEBUGFASTCGI
+                        std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                        #endif
                         memcpy(&targetHttp.sin6_addr,&entry.sin6_addr,16);
                         client->dnsRight(targetHttp);
                     }
                 break;
                 case StatusEntry_Error:
+                    #ifdef DEBUGFASTCGI
+                    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                    #endif
                     client->dnsError();
                 break;
                 default:
                 case StatusEntry_Wrong:
+                    #ifdef DEBUGFASTCGI
+                    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+                    #endif
                     client->dnsWrong();
                 break;
             }
             return true;
         }
     }
+    #ifdef DEBUGFASTCGI
+    std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
+    #endif
     if(clientInProgress>1000)
         return false;
     clientInProgress++;
